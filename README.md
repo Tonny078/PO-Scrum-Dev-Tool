@@ -20,7 +20,11 @@ Built by **Tonny Sluijs**. Free to use for everyone.
 | **`ProductOwner-Toolv01.html`** | Product Owners | Kanban boards, a decision log that keeps the *why*, a quarterly roadmap, a value/effort backlog, goals with key results, retrospectives, notes and a document register |
 <img width="1919" height="938" alt="image" src="https://github.com/user-attachments/assets/81baa1e9-bdef-41ce-86e2-f97477acfed6" />
 
+
+| File | For | What it does |
+|---|---|---|
 | **`Developer-Toolv01.html`** | Frontend, Backend, Fullstack | Several Kanban boards (one per project), a snippet and command library with one-click copy, a register of services and their ports and URLs, architecture decision records, a tech-debt list, checklists with a git and HTTP reference, notes and links |
+<img width="1919" height="944" alt="image" src="https://github.com/user-attachments/assets/6f49b679-0d08-438a-833d-ea94d097f177" />
 
 They are independent. Use one, or all three — each keeps its own data and they never overwrite each other, even in the same browser or the same folder.
 
