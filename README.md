@@ -1,6 +1,6 @@
 # Agile Workspace Tools
 
-Two free, single-file workspaces for the people who run agile teams — one for the **Scrum Master**, one for the **Product Owner**.
+3 free, single-file workspaces for the people who run agile teams, one for the **Scrum Master**, one for the **Product Owner**, one for the **Developers**. 
 
 No install. No account. No server. No tracking. Each tool is a single `.html` file: download it, double-click it, and it works. Your data stays on your own machine.
 
