@@ -20,16 +20,16 @@ Built by **Tonny Sluijs**. Free to use for everyone.
 | **`ProductOwner-Toolv01.html`** | Product Owners | Kanban boards, a decision log that keeps the *why*, a quarterly roadmap, a value/effort backlog, goals with key results, retrospectives, notes and a document register |
 <img width="1919" height="938" alt="image" src="https://github.com/user-attachments/assets/81baa1e9-bdef-41ce-86e2-f97477acfed6" />
 
+| **`Developer-Toolv01.html`** | Frontend, Backend, Fullstack | Several Kanban boards (one per project), a snippet and command library with one-click copy, a register of services and their ports and URLs, architecture decision records, a tech-debt list, checklists with a git and HTTP reference, notes and links |
 
-
-They are independent. Use one, or both — they store their data separately and never overwrite each other.
+They are independent. Use one, or all three — each keeps its own data and they never overwrite each other, even in the same browser or the same folder.
 
 ---
 
 ## Quick start
 
 1. Go to the green **Code** button above → **Download ZIP**, and unzip it. (Or clone the repo.)
-2. Double-click `ScrumMaster-Toolv01.html` or `ProductOwner-Toolv01.html`. It opens in your browser.
+2. Double-click the tool you want. It opens in your browser.
 3. A one-time setup asks **where your data should live**. Pick either option — you can switch later in Settings.
 
 That is the whole installation.
@@ -109,12 +109,31 @@ Keep as many boards as you like — one per team, plus a private board for your 
 
 ---
 
+## The Developer tool
+
+Built for Frontend, Backend and Fullstack developers, and deliberately free of ceremony — no sprints, no burndowns, no standups. Just the things you actually lose time to.
+
+- **Boards** — one per project or repo, switched from a dropdown. Cards carry a work **type** (feature, bug, chore, refactor, spike, docs), an estimate, the **branch name** (copyable in one click — the thing you retype all day) and a link to the **PR or issue**, opened straight from the card. Plus WIP limits that turn red when exceeded, blocked cards with a reason, and stale-card warnings.
+- **Snippets** — the code you rewrite from memory every few months: the debounce, the awkward SQL join, the regex that took an hour. Filter by language, one click copies it back out.
+- **Commands** — your own cheatsheet, grouped by git / docker / npm / database / deploy. The flags you re-google, one click from the clipboard.
+- **Stack** — every service with its local port and its staging and production URLs, plus repo and docs links. The end of "what port does that run on again?". It warns you, in the form, never to put credentials in it.
+- **Decisions** — architecture decision records: the problem, what you chose, **what you turned down and why**. Every edit is kept in that record's history. This is the answer to "why on earth is this like this?" two years later.
+- **Tech Debt** — the shortcuts you know about, with severity, effort, where they live and **what they cost you**. It turns "the code is a mess" into a list you can negotiate time for. Any item can be pushed onto a board as a refactor card; a blocked card can be logged as debt in one step.
+- **Checklists** — your pull request, code review and release checklists (seeded on first run), plus a built-in reference: git rescue commands, HTTP status codes with what they *actually* mean, semver rules and conventional commit types.
+- **Flow** — cycle time, work in progress, blocked count and a chart of what you finished per week for the last eight weeks. Measured from real card movement, not self-reported.
+- **Focus timer** — a session clock in the top bar that keeps running while you move around the tool.
+- Plus **Notes** and **Links**.
+
+Shortcuts: `/` search · `n` new task · `s` new snippet · `c` new command · `d` new decision · `f` focus session · `b` boards · `g` overview · `?` the full list.
+
+---
+
 ## Good to know
 
 - **Everything is optional.** Empty sections stay out of your way and explain what they are for when you first open them.
 - **Light and dark**, following your system setting or pinned in Settings.
-- **The alert bell** collects what actually needs you: aging impediments, blocked cards, a Sprint ending with work left, ceremonies due today, retro actions nobody has done, overdue items and note reminders.
-- **Nothing is uploaded, ever.** Both tools work fully offline, including on a plane.
+- **The alert bell** collects what actually needs you — whichever tool you are in: blocked and stale cards, aging impediments or tech debt, a Sprint ending with work left, ceremonies due today, decisions left hanging, overdue items and note reminders.
+- **Nothing is uploaded, ever.** All three tools work fully offline, including on a plane.
 - **Print** — `Ctrl/Cmd + P` gives a clean printout with the navigation stripped out.
 
 ## Browser support
@@ -126,9 +145,13 @@ Keep as many boards as you like — one per team, plus a private board for your 
 
 Any reasonably current browser runs the tools. Folder storage is the only feature that needs Chrome or Edge.
 
+## Running more than one
+
+Each tool has its own storage namespace (`sm.`, `po.` and `dev.`), its own IndexedDB database and its own export file, so they can share a browser and a folder without ever touching each other. A Scrum Master who also writes code can keep the Scrum Master tool and the Developer tool open in two tabs, and neither will notice the other.
+
 ## Under the hood
 
-Plain HTML, CSS and JavaScript in one file each. **Zero dependencies** — no framework, no build step, no `node_modules`, no CDN. Nothing to audit but the file itself, and nothing to break when a package updates. The charts are hand-written SVG and the icons are inline paths.
+Plain HTML, CSS and JavaScript in one file each — around 4,000 to 5,500 lines including the styling. **Zero dependencies** — no framework, no build step, no `node_modules`, no CDN. Nothing to audit but the file itself, and nothing to break when a package updates. The charts are hand-written SVG and the icons are inline paths.
 
 To change something, open the file in any editor. The script is laid out in numbered sections — utilities, icons, storage, state, render, views, actions — and each screen is one function that returns HTML.
 
@@ -141,6 +164,10 @@ Issues and pull requests are welcome. Please keep the two ground rules that make
 Free to use, copy, modify and share, for any purpose, personal or commercial — no attribution required and no strings attached.
 
 If you are cloning this to make it your own, the MIT licence is a good fit; add a `LICENSE` file with your own name as the copyright holder.
+
+---
+
+*Built by Tonny Sluijs. If these save you time, that is the whole point.*
 
 ---
 
