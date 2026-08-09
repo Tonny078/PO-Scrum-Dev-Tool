@@ -15,6 +15,8 @@ Built by **Tonny Sluijs**. Free to use for everyone.
 | **`ScrumMaster-Toolv01.html`** | Scrum Masters | Sprints with burndown and velocity, an impediment register that counts days, ceremony agendas with a timebox timer, a Daily Scrum log, team capacity and health, a living Definition of Done, and a Scrum quick reference |
 <img width="1917" height="942" alt="image" src="https://github.com/user-attachments/assets/4334d3a4-acf5-41dc-b241-642bd1b46c66" />
 
+| File | For | What it does |
+|---|---|---|
 | **`ProductOwner-Toolv01.html`** | Product Owners | Kanban boards, a decision log that keeps the *why*, a quarterly roadmap, a value/effort backlog, goals with key results, retrospectives, notes and a document register |
 <img width="1919" height="943" alt="image" src="https://github.com/user-attachments/assets/87ee7d0b-1870-410a-8221-b5dd774285e3" />
 
