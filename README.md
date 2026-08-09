@@ -18,7 +18,8 @@ Built by **Tonny Sluijs**. Free to use for everyone.
 | File | For | What it does |
 |---|---|---|
 | **`ProductOwner-Toolv01.html`** | Product Owners | Kanban boards, a decision log that keeps the *why*, a quarterly roadmap, a value/effort backlog, goals with key results, retrospectives, notes and a document register |
-<img width="1919" height="943" alt="image" src="https://github.com/user-attachments/assets/87ee7d0b-1870-410a-8221-b5dd774285e3" />
+<img width="1919" height="938" alt="image" src="https://github.com/user-attachments/assets/81baa1e9-bdef-41ce-86e2-f97477acfed6" />
+
 
 
 They are independent. Use one, or both — they store their data separately and never overwrite each other.
