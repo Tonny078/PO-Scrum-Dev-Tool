@@ -755,6 +755,10 @@ table.tbl tbody tr:hover{background:var(--surface-2)}
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-3)"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5-5m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <input id="search" type="search" placeholder="Search everything…" autocomplete="off">
         </div>
+        <div class="seg" id="langSeg" title="Language / Taal">
+          <button data-action="set-lang" data-lang="en" class="on">EN</button>
+          <button data-action="set-lang" data-lang="nl">NL</button>
+        </div>
         <button class="icon-btn" data-action="toggle-panel" data-panel="alerts" title="Alerts" id="bellBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="pointer-events:none"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
         </button>
@@ -782,6 +786,90 @@ table.tbl tbody tr:hover{background:var(--surface-2)}
    Sections below: utils › icons › store › state › render › views › actions.
    ========================================================================= */
 "use strict";
+/* ============================================================================
+   0. LANGUAGE  (display only — never touches stored data)
+   ---------------------------------------------------------------------------
+   The catalog is keyed by the English source string, so anything not yet
+   translated simply renders in English instead of leaking a key. The chosen
+   language lives in its own localStorage entry, deliberately outside the
+   workspace: settings.json, the folder JSON and the export bundle are
+   unchanged by switching language.
+   ========================================================================= */
+const LANG_KEY = "po.lang";
+let LANG = "en";
+try { LANG = localStorage.getItem(LANG_KEY) === "nl" ? "nl" : "en"; } catch (e) { LANG = "en"; }
+
+/* Add ?i18n=audit to the URL to bracket every translated string. Anything on
+   screen WITHOUT brackets is a literal that still needs wrapping. */
+const I18N_AUDIT = /[?&]i18n=audit/.test(location.search);
+const _missing = new Set();
+
+/**
+ * Translate one interface string. The English text is the key, so anything
+ * missing from the catalog renders in English rather than leaking a key.
+ * Returns plain text — wrap in esc() exactly where the English literal was.
+ *   _t("Add task")
+ *   _t("Low", "impact")   // tries "impact|Low", then "Low"
+ */
+function _t(s, ctx) {
+  if (s === null || s === undefined || typeof s !== "string") return s;
+  let out = s;
+  if (LANG === "nl") {
+    const ck = ctx ? ctx + "|" + s : null;
+    if (ck && Object.prototype.hasOwnProperty.call(NL, ck)) out = NL[ck];
+    else if (Object.prototype.hasOwnProperty.call(NL, s)) out = NL[s];
+    else { if (s.trim()) _missing.add(ck || s); if (I18N_AUDIT) out = "«" + s + "»"; }
+  } else if (I18N_AUDIT && s.trim()) {
+    out = "[" + s + "]";
+  }
+  return out;
+}
+
+/** Translate with named placeholders, so Dutch may reorder them.
+ *  _tp("Imported {a} new, {b} updated.", { a: 3, b: 1 }) */
+function _tp(s, vars) {
+  return String(_t(s)).replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m));
+}
+
+/** Console helper: which wrapped strings still have no Dutch. */
+window.__i18nMissing = () => Array.from(_missing).sort();
+
+/* Display labels for stored enum values. The VALUE stays an English identifier
+   in the data and in CSS class names; only what the user reads is translated. */
+const VALUE_LABELS = {
+  status:    { proposed: "Proposed", pending: "Pending", approved: "Approved", rejected: "Rejected", superseded: "Superseded" },
+  priority:  { low: "Low", medium: "Medium", high: "High", critical: "Critical" },
+  impact:    { low: "Low", medium: "Medium", high: "High", critical: "Critical" },
+  severity:  { low: "Low", medium: "Medium", high: "High" },
+  milestone: { planned: "Planned", active: "Active", done: "Done", atrisk: "At risk" },
+  colour:    { yellow: "Yellow", blue: "Blue", green: "Green", pink: "Pink", purple: "Purple" },
+};
+
+/** Display label for a stored enum value. `domain` doubles as the _t context. */
+function vlabel(domain, value) {
+  const v = String(value === null || value === undefined ? "" : value);
+  if (!v) return "";
+  const en = (VALUE_LABELS[domain] || {})[v] || (v[0].toUpperCase() + v.slice(1));
+  return _t(en, domain);
+}
+
+/** Apply the language to the parts of the shell that render() never repaints. */
+function applyLang() {
+  document.documentElement.lang = LANG;
+  const set = (sel, text) => { const el = $(sel); if (el) el.textContent = text; };
+  document.title = LANG === "nl"
+    ? "PO Dashboard — Product Owner Werkruimte van Tonny Sluijs"
+    : "PO Dashboard — Product Owner Workspace by Tonny Sluijs";
+  set(".brandinfo .sub", _t("Product Owner Workspace"));
+  set(".brand-sub", _t("Workspace by Tonny Sluijs."));
+  const search = $("#search");
+  if (search) search.placeholder = _t("Search everything…");
+  const bell = $("#bellBtn"); if (bell) bell.title = _t("Alerts");
+  const act = $('[data-panel="activity"]'); if (act) act.title = _t("Recent activity");
+  const chip = $(".user-chip"); if (chip) chip.title = _t("Open settings");
+  $$("#langSeg button").forEach(b => b.classList.toggle("on", b.dataset.lang === LANG));
+}
+
 /* ============================================================================
    1. UTILITIES
    ========================================================================= */
@@ -857,7 +945,9 @@ function avatar(name, size) {
   const bg = "linear-gradient(135deg,hsl(" + h + ",62%,54%),hsl(" + ((h + 38) % 360) + ",62%,44%))";
   return '<span class="avatar ' + (size || "") + '" style="background:' + bg + '" title="' + esc(name) + '">' + esc(initials(name)) + "</span>";
 }
-function pluralise(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+function pluralise(n, one, many) {
+  return n + " " + (n === 1 ? _t(one) : (many ? _t(many) : _t(one + "s")));
+}
 function sortBy(arr, fn, dir) {
   return arr.slice().sort((a, b) => {
     const x = fn(a), y = fn(b);
@@ -1143,7 +1233,7 @@ function setSaveState(kind) {
     error: [ic("alert", 13), "Not saved", "var(--red)"],
   };
   const m = map[kind] || map.saved;
-  el.innerHTML = m[0] + "<span>" + m[1] + "</span>";
+  el.innerHTML = m[0] + "<span>" + esc(_t(m[1])) + "</span>";
   el.style.color = m[2];
 }
 
@@ -1220,7 +1310,7 @@ function toast(message, kind, ms) {
   const el = document.createElement("div");
   el.className = "toast " + (kind || "ok");
   const iconName = kind === "err" ? "alert" : kind === "warn" ? "info" : "checkCircle";
-  el.innerHTML = ic(iconName, 16) + "<span>" + esc(message) + "</span>";
+  el.innerHTML = ic(iconName, 16) + "<span>" + esc(_t(message)) + "</span>";
   host.appendChild(el);
   setTimeout(() => {
     el.style.transition = "opacity .25s,transform .25s";
@@ -1264,8 +1354,8 @@ function openModal(opts) {
     '<div class="overlay" data-overlay>' +
       '<form class="modal ' + (opts.width || "") + '" id="modalForm" autocomplete="off">' +
         '<div class="modal-head">' +
-          "<div><h3>" + esc(opts.title) + "</h3>" +
-            (opts.subtitle ? "<p>" + esc(opts.subtitle) + "</p>" : "") +
+          "<div><h3>" + esc(_t(opts.title)) + "</h3>" +
+            (opts.subtitle ? "<p>" + esc(_t(opts.subtitle)) + "</p>" : "") +
           "</div>" +
           '<button type="button" class="close-x" data-action="modal-close" aria-label="Close">' + ic("x", 17) + "</button>" +
         "</div>" +
@@ -1276,8 +1366,8 @@ function openModal(opts) {
         "</div>" +
         '<div class="modal-foot">' +
           (opts.footLeftHTML ? '<div class="spacer" style="text-align:left">' + opts.footLeftHTML + "</div>" : '<div class="spacer"></div>') +
-          '<button type="button" class="btn btn-ghost" data-action="modal-close">' + esc(opts.cancelLabel || "Cancel") + "</button>" +
-          (opts.onSave ? '<button type="submit" class="btn btn-primary">' + esc(opts.saveLabel || "Save") + "</button>" : "") +
+          '<button type="button" class="btn btn-ghost" data-action="modal-close">' + esc(_t(opts.cancelLabel || "Cancel")) + "</button>" +
+          (opts.onSave ? '<button type="submit" class="btn btn-primary">' + esc(_t(opts.saveLabel || "Save")) + "</button>" : "") +
         "</div>" +
       "</form>" +
     "</div>";
@@ -1289,7 +1379,7 @@ function openModal(opts) {
       const out = collectForm(form, fields);
       const missing = fields.filter(f => f.required && !String(out[f.name] || "").trim());
       if (missing.length) {
-        toast(missing[0].label + " is required.", "warn");
+        toast(_tp("{field} is required.", { field: _t(missing[0].label) }), "warn");
         const el = form.querySelector('[name="' + missing[0].name + '"]');
         if (el) el.focus();
         return;
@@ -1305,25 +1395,25 @@ function openModal(opts) {
 function fieldHTML(f, value) {
   if (f.type === "static") {
     return '<div class="field ' + (f.full === false ? "" : "full") + '">' +
-      (f.label ? "<label>" + esc(f.label) + "</label>" : "") + (f.html || "") + "</div>";
+      (f.label ? "<label>" + esc(_t(f.label)) + "</label>" : "") + (f.html || "") + "</div>";
   }
   const id = "f_" + f.name;
   const cls = "field" + (f.full === false ? "" : (f.half ? "" : " full"));
-  const label = '<label for="' + id + '">' + esc(f.label) + (f.required ? ' <span class="req">*</span>' : "") + "</label>";
-  const hint = f.hint ? '<span class="hint">' + esc(f.hint) + "</span>" : "";
+  const label = '<label for="' + id + '">' + esc(_t(f.label)) + (f.required ? ' <span class="req">*</span>' : "") + "</label>";
+  const hint = f.hint ? '<span class="hint">' + esc(_t(f.hint)) + "</span>" : "";
   let input = "";
 
   switch (f.type) {
     case "textarea":
       input = '<textarea class="inp" id="' + id + '" name="' + f.name + '" rows="' + (f.rows || 3) +
-        '" placeholder="' + esc(f.placeholder || "") + '">' + esc(value || "") + "</textarea>";
+        '" placeholder="' + esc(_t(f.placeholder) || "") + '">' + esc(value || "") + "</textarea>";
       break;
     case "select":
       input = '<select class="sel" id="' + id + '" name="' + f.name + '">' +
         (f.options || []).map(o => {
           const ov = typeof o === "string" ? o : o.value;
           const ol = typeof o === "string" ? o : o.label;
-          return '<option value="' + esc(ov) + '"' + (String(value) === String(ov) ? " selected" : "") + ">" + esc(ol) + "</option>";
+          return '<option value="' + esc(ov) + '"' + (String(value) === String(ov) ? " selected" : "") + ">" + esc(f.raw ? ol : _t(ol)) + "</option>";
         }).join("") + "</select>";
       break;
     case "date":
@@ -1335,17 +1425,17 @@ function fieldHTML(f, value) {
       break;
     case "tags":
       input = '<input class="inp" type="text" id="' + id + '" name="' + f.name + '" value="' +
-        esc(Array.isArray(value) ? value.join(", ") : (value || "")) + '" placeholder="' + esc(f.placeholder || "comma, separated") + '">';
+        esc(Array.isArray(value) ? value.join(", ") : (value || "")) + '" placeholder="' + esc(_t(f.placeholder || "comma, separated")) + '">';
       break;
     case "checkbox":
       return '<div class="' + cls + '"><label class="row" style="cursor:pointer;font-weight:600">' +
         '<input type="checkbox" name="' + f.name + '" ' + (value ? "checked" : "") +
-        ' style="width:15px;height:15px;accent-color:var(--primary)"> ' + esc(f.label) + "</label>" + hint + "</div>";
+        ' style="width:15px;height:15px;accent-color:var(--primary)"> ' + esc(_t(f.label)) + "</label>" + hint + "</div>";
     case "repeater":
       return '<div class="' + cls + '">' + label + repeaterHTML(f, value) + hint + "</div>";
     default:
       input = '<input class="inp" type="text" id="' + id + '" name="' + f.name + '" value="' + esc(value || "") +
-        '" placeholder="' + esc(f.placeholder || "") + '">';
+        '" placeholder="' + esc(_t(f.placeholder) || "") + '">';
   }
   return '<div class="' + cls + '">' + label + input + hint + "</div>";
 }
@@ -1355,19 +1445,19 @@ function repeaterHTML(f, value) {
   // A header row so no control in the grid is left unlabelled.
   const headers = f.headers
     ? '<div class="rep-row rep-head">' +
-      (f.checkKey ? '<span class="rep-h rep-h-check">' + esc(f.headers[0]) + "</span>" : "") +
+      (f.checkKey ? '<span class="rep-h rep-h-check">' + esc(_t(f.headers[0])) + "</span>" : "") +
       f.sub.filter(s => s.type !== "hidden").map((s, i) =>
         '<span class="rep-h"' + (s.width ? ' style="flex:0 0 ' + s.width + '"' : "") + ">" +
-        esc(f.headers[(f.checkKey ? 1 : 0) + i] || "") + "</span>").join("") +
+        esc(_t(f.headers[(f.checkKey ? 1 : 0) + i] || "")) + "</span>").join("") +
       '<span class="rep-h" style="flex:0 0 30px"></span></div>'
     : "";
   return '<div data-rep="' + f.name + '" data-subs=\'' + esc(JSON.stringify(f.sub)) + "'" +
-    ' data-check-key="' + esc(f.checkKey || "") + '" data-check-title="' + esc(f.checkTitle || "Done") + '"' +
+    ' data-check-key="' + esc(f.checkKey || "") + '" data-check-title="' + esc(_t(f.checkTitle || "Done")) + '"' +
     ' data-check-default="' + (f.checkDefault ? "1" : "") + '">' +
     headers +
     '<div class="rep-rows">' + rows + "</div>" +
     '<button type="button" class="btn btn-ghost btn-sm" data-action="rep-add" data-rep="' + f.name + '" style="margin-top:2px">' +
-    ic("plus", 13) + esc(f.addLabel || "Add row") + "</button></div>";
+    ic("plus", 13) + esc(_t(f.addLabel || "Add row")) + "</button></div>";
 }
 function repeaterRow(f, v) {
   v = v || {};
@@ -1382,19 +1472,19 @@ function repeaterRow(f, v) {
         (s.options || []).map(o => {
           const ov = typeof o === "string" ? o : o.value;
           const ol = typeof o === "string" ? o : o.label;
-          return '<option value="' + esc(ov) + '"' + (String(v[s.name]) === String(ov) ? " selected" : "") + ">" + esc(ol) + "</option>";
+          return '<option value="' + esc(ov) + '"' + (String(v[s.name]) === String(ov) ? " selected" : "") + ">" + esc(_t(ol)) + "</option>";
         }).join("") + "</select>";
     }
-    return '<input class="inp" data-sub="' + s.name + '" placeholder="' + esc(s.placeholder || s.name) +
+    return '<input class="inp" data-sub="' + s.name + '" placeholder="' + esc(_t(s.placeholder || s.name)) +
       '" value="' + esc(v[s.name] || "") + '"' + (s.width ? ' style="flex:0 0 ' + s.width + '"' : "") + ">";
   }).join("");
   const ticked = v[f.checkKey] === undefined ? !!f.checkDefault : !!v[f.checkKey];
   const box = '<input type="checkbox" class="rep-check" data-sub="' + f.checkKey + '" ' + (ticked ? "checked" : "") +
-    ' title="' + esc(f.checkTitle || "Done") + '" aria-label="' + esc(f.checkTitle || "Done") + '">';
+    ' title="' + esc(_t(f.checkTitle || "Done")) + '" aria-label="' + esc(_t(f.checkTitle || "Done")) + '">';
   const check = !f.checkKey ? ""
     : f.headers ? '<span class="rep-check-cell">' + box + "</span>" : box;
   return '<div class="rep-row">' + check + inputs +
-    '<button type="button" class="rep-del" data-action="rep-del" title="Remove row">' + ic("x", 14) + "</button></div>";
+    '<button type="button" class="rep-del" data-action="rep-del" title="' + esc(_t("Remove row")) + '">' + ic("x", 14) + "</button></div>";
 }
 
 function collectForm(form, fields) {
@@ -1556,19 +1646,19 @@ function render() {
 function renderNav() {
   $("#nav").innerHTML = NAV.map(n => {
     const c = navCount(n.id);
-    return '<button class="nav-item' + (ui.view === n.id ? " active" : "") + '" data-action="go" data-view="' + n.id + '" title="' + esc(n.label) + '">' +
-      ic(n.icon, 18) + '<span class="lbl">' + esc(n.label) + "</span>" +
+    return '<button class="nav-item' + (ui.view === n.id ? " active" : "") + '" data-action="go" data-view="' + n.id + '" title="' + esc(_t(n.label)) + '">' +
+      ic(n.icon, 18) + '<span class="lbl">' + esc(_t(n.label)) + "</span>" +
       (c ? '<span class="count">' + c + "</span>" : "") + "</button>";
   }).join("");
 }
 
 function renderTopbar() {
-  const name = S.settings.profile.name || "Product Owner";
+  const name = S.settings.profile.name || _t("Product Owner");
   const h = new Date().getHours();
   const part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   const shown = name.length <= 18 ? name : name.split(" ")[0];
-  $("#greet").innerHTML = esc(part + ", " + shown + "!") + " 👋";
-  $("#greetSub").textContent = S.settings.workspaceName || "Let's build something amazing today.";
+  $("#greet").innerHTML = esc(_t(part) + ", " + shown + "!") + " 👋";
+  $("#greetSub").textContent = S.settings.workspaceName || _t("Let's build something amazing today.");
   const av = $("#meAvatar");
   av.textContent = initials(name);
   const hue = hueOf(name);
@@ -1583,8 +1673,8 @@ function renderTopbar() {
 /** Sits under every view. Free to use, so the credit travels with it. */
 function appFooter() {
   return '<footer class="app-foot">' +
-    "<span>PO Dashboard — <b>Product Owner Workspace</b> · your data never leaves this machine</span>" +
-    '<span class="credit">Built by Tonny Sluijs · free to use</span>' +
+    "<span>PO Dashboard — <b>" + esc(_t("Product Owner Workspace")) + "</b> · " + esc(_t("your data never leaves this machine")) + "</span>" +
+    '<span class="credit">' + esc(_t("Built by Tonny Sluijs · free to use")) + "</span>" +
     "</footer>";
 }
 
@@ -1596,11 +1686,12 @@ function renderFocusCard() {
   $("#focusCard").innerHTML =
     '<svg class="stars" aria-hidden="true"><circle cx="18" cy="26" r="1.4" fill="#fff"/><circle cx="132" cy="18" r="1" fill="#fff"/>' +
     '<circle cx="74" cy="72" r="1.8" fill="#fff"/><circle cx="112" cy="104" r="1" fill="#fff"/><circle cx="34" cy="112" r="1.3" fill="#fff"/></svg>' +
-    "<h4>Stay Focused! 🚀</h4>" +
-    "<p>" + (st.total ? esc(st.done + " of " + st.total + " tasks done") : "Small progress every day adds up to big results.") + "</p>" +
-    '<div class="focus-stat"><span>Sprint</span><span>' + st.percent + "%</span></div>" +
+    "<h4>" + esc(_t("Stay Focused!")) + " 🚀</h4>" +
+    "<p>" + (st.total ? esc(_tp("{done} of {total} tasks done", { done: st.done, total: st.total }))
+                     : esc(_t("Small progress every day adds up to big results."))) + "</p>" +
+    '<div class="focus-stat"><span>' + esc(_t("Sprint")) + '</span><span>' + st.percent + "%</span></div>" +
     '<div class="focus-bar"><span style="width:' + st.percent + '%"></span></div>' +
-    '<div class="focus-stat"><span>Goals</span><span>' + gp + "%</span></div>" +
+    '<div class="focus-stat"><span>' + esc(_t("Goals")) + '</span><span>' + gp + "%</span></div>" +
     '<div class="focus-bar"><span style="width:' + gp + '%;background:linear-gradient(90deg,#fbbf24,#f472b6)"></span></div>';
 }
 
@@ -1672,29 +1763,29 @@ function matchText() {
    11. SHARED VIEW FRAGMENTS
    ========================================================================= */
 function pageHead(title, sub, actionsHTML) {
-  return '<div class="page-head"><div><h2>' + esc(title) + "</h2>" +
-    (sub ? "<p>" + esc(sub) + "</p>" : "") + "</div>" +
+  return '<div class="page-head"><div><h2>' + esc(_t(title)) + "</h2>" +
+    (sub ? "<p>" + esc(_t(sub)) + "</p>" : "") + "</div>" +
     '<div class="page-actions">' + (actionsHTML || "") + "</div></div>";
 }
 function emptyState(icon, title, text, actionHTML, small) {
   return '<div class="empty' + (small ? " sm" : "") + '"><span class="ic">' + ic(icon, small ? 18 : 24) + "</span>" +
-    "<h4>" + esc(title) + "</h4>" + (text ? "<p>" + esc(text) + "</p>" : "") +
+    "<h4>" + esc(_t(title)) + "</h4>" + (text ? "<p>" + esc(_t(text)) + "</p>" : "") +
     (actionHTML ? '<div style="margin-top:6px">' + actionHTML + "</div>" : "") + "</div>";
 }
 function statusBadge(status) {
   const map = { approved: "b-approved", pending: "b-pending", rejected: "b-rejected", superseded: "b-superseded", proposed: "b-proposed" };
   const icons = { approved: "checkCircle", pending: "dotCircle", rejected: "xCircle", superseded: "history", proposed: "info" };
   const s = status || "pending";
-  return '<span class="badge ' + (map[s] || "b-neutral") + '">' + ic(icons[s] || "dotCircle", 12, 2.4) + esc(s[0].toUpperCase() + s.slice(1)) + "</span>";
+  return '<span class="badge ' + (map[s] || "b-neutral") + '">' + ic(icons[s] || "dotCircle", 12, 2.4) + esc(vlabel("status", s)) + "</span>";
 }
 function priorityBadge(p) {
   const s = (p || "medium").toLowerCase();
-  return '<span class="badge b-' + s + '">' + esc(s[0].toUpperCase() + s.slice(1)) + "</span>";
+  return '<span class="badge b-' + s + '">' + esc(vlabel("priority", s)) + "</span>";
 }
 function impactBadge(i) {
   const s = (i || "medium").toLowerCase();
   const cls = { high: "b-high", medium: "b-medium", low: "b-low", critical: "b-critical" }[s] || "b-neutral";
-  return '<span class="badge ' + cls + '">' + esc(s[0].toUpperCase() + s.slice(1)) + " impact</span>";
+  return '<span class="badge ' + cls + '">' + esc(_tp("{level} impact", { level: vlabel("impact", s) })) + "</span>";
 }
 function donut(segments, centreValue, centreLabel) {
   const total = segments.reduce((a, s) => a + s.value, 0);
@@ -1732,8 +1823,8 @@ function taskCard(t, board, col) {
           ${t.assignee ? avatar(t.assignee) : ""}
           ${t.due ? `<span class="task-meta ${late ? "late" : ""}">${late ? ic("alert", 11, 2.4) : ""}${esc(fmtShort(t.due))}</span>` : ""}
           <span class="task-move">
-            <button data-action="move-task" data-dir="-1" data-task-id="${t.id}" title="Move left" aria-label="Move left">${ic("chevL", 12, 2.6)}</button>
-            <button data-action="move-task" data-dir="1" data-task-id="${t.id}" title="Move right" aria-label="Move right">${ic("chevR", 12, 2.6)}</button>
+            <button data-action="move-task" data-dir="-1" data-task-id="${t.id}" title="${_t("Move left")}" aria-label="${_t("Move left")}">${ic("chevL", 12, 2.6)}</button>
+            <button data-action="move-task" data-dir="1" data-task-id="${t.id}" title="${_t("Move right")}" aria-label="${_t("Move right")}">${ic("chevR", 12, 2.6)}</button>
           </span>
         </div>
       </div>
@@ -1751,14 +1842,14 @@ function kanbanHTML(board, compact) {
     return `<div class="kcol ${compact ? "compact" : ""}" data-accent="${esc(col.accent || "slate")}" data-col-id="${col.id}" data-drop-col="${col.id}">
         <div class="kcol-head">
           <span class="name grow truncate">${esc(col.name)}</span>
-          ${col.wip ? `<span class="mini bold ${over ? "over" : "dim"}" title="Work-in-progress limit">${all}/${col.wip}</span>` : ""}
+          ${col.wip ? `<span class="mini bold ${over ? "over" : "dim"}" title="${_t("Work-in-progress limit")}">${all}/${col.wip}</span>` : ""}
           <span class="n">${all}</span>
         </div>
         <div class="kbody">
           ${tasks.length ? tasks.map(t => taskCard(t, board, col)).join("")
-            : `<div class="empty sm" style="padding:16px 8px"><p class="mini">${q ? "No match here" : "Drop tasks here"}</p></div>`}
+            : `<div class="empty sm" style="padding:16px 8px"><p class="mini">${q ? _t("No match here") : _t("Drop tasks here")}</p></div>`}
         </div>
-        <button class="kadd" data-action="new-task" data-col-id="${col.id}">${ic("plus", 12, 2.6)}Add Task</button>
+        <button class="kadd" data-action="new-task" data-col-id="${col.id}">${ic("plus", 12, 2.6)}${_t("Add Task")}</button>
       </div>`;
   }).join("") + `</div>`;
 }
@@ -1769,10 +1860,10 @@ function boardSelector() {
   const boards = S.boards.items;
   const active = activeBoard();
   if (!boards.length) return "";
-  return `<select class="sel sel-auto" data-action="set-board" title="Switch board or create a new one">
-      ${boards.map(b => `<option value="${b.id}" ${active && b.id === active.id ? "selected" : ""}>Board: ${esc(b.name)}</option>`).join("")}
+  return `<select class="sel sel-auto" data-action="set-board" title="${_t("Switch board or create a new one")}">
+      ${boards.map(b => `<option value="${b.id}" ${active && b.id === active.id ? "selected" : ""}>${_t("Board")}: ${esc(b.name)}</option>`).join("")}
       <option disabled>──────────</option>
-      <option value="${NEW_BOARD_OPTION}">+ New board…</option>
+      <option value="${NEW_BOARD_OPTION}">+ ${_t("New board…")}</option>
     </select>`;
 }
 
@@ -1964,24 +2055,24 @@ VIEWS.taskboard = function () {
     return pageHead("Taskboard", "Your Kanban workspace.") +
       `<div class="card">${emptyState("board", "No board yet",
         "Create your first board. It starts with Backlog, To Do, In Progress, Review and Done — rename, recolour or delete any of them afterwards.",
-        `<button class="btn btn-primary" data-action="new-board">${ic("plus", 14)}Create board</button>`)}</div>`;
+        `<button class="btn btn-primary" data-action="new-board">${ic("plus", 14)}${_t("Create board")}</button>`)}</div>`;
   }
   const st = boardStats(board);
   return `
-  ${pageHead("Taskboard", `${esc(board.name)} · ${pluralise(st.total, "task")} · ${st.done} done · ${st.overdue} overdue`, `
+  ${pageHead("Taskboard", `${esc(board.name)} · ${pluralise(st.total, "task")} · ${_tp("{n} done", { n: st.done })} · ${_tp("{n} overdue", { n: st.overdue })}`, `
     ${boardSelector()}
-    <button class="btn btn-ghost" data-action="edit-board">${ic("edit", 13)}Edit board</button>
-    <button class="btn btn-ghost" data-action="new-board">${ic("plus", 13)}New board</button>
-    <button class="btn btn-primary" data-action="new-task">${ic("plus", 14)}New Task</button>`)}
+    <button class="btn btn-ghost" data-action="edit-board">${ic("edit", 13)}${_t("Edit board")}</button>
+    <button class="btn btn-ghost" data-action="new-board">${ic("plus", 13)}${_t("New board")}</button>
+    <button class="btn btn-primary" data-action="new-task">${ic("plus", 14)}${_t("New Task")}</button>`)}
 
   <div class="card">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon">${ic("board", 18, 2.2)}</span>
-        <div><h3>${esc(board.name)}</h3><span class="sub">${esc(board.description || "Drag cards between columns, or use the arrows on a card.")}</span></div></div>
+        <div><h3>${esc(board.name)}</h3><span class="sub">${esc(board.description || _t("Drag cards between columns, or use the arrows on a card."))}</span></div></div>
       <div class="row">
         <div class="progress" style="width:120px"><span style="width:${st.percent}%"></span></div>
         <b class="tiny">${st.percent}%</b>
-        <button class="btn btn-ghost btn-sm" data-action="add-column">${ic("plus", 12)}Column</button>
+        <button class="btn btn-ghost btn-sm" data-action="add-column">${ic("plus", 12)}${_t("Column")}</button>
       </div>
     </div>
     ${kanbanHTML(board, false)}
@@ -2309,9 +2400,17 @@ VIEWS.settings = function () {
           <div><div class="lbl">Theme</div>
             <div class="desc">“System” follows your Windows light/dark setting. Your choice is saved with the workspace.</div></div>
           <div class="seg">
-            <button data-action="set-theme" data-theme="light" class="${theme === "light" ? "on" : ""}">${ic("sun", 13)} Light</button>
-            <button data-action="set-theme" data-theme="dark" class="${theme === "dark" ? "on" : ""}">${ic("moon", 13)} Dark</button>
-            <button data-action="set-theme" data-theme="system" class="${theme === "system" ? "on" : ""}">${ic("monitor", 13)} System</button>
+            <button data-action="set-theme" data-theme="light" class="${theme === "light" ? "on" : ""}">${ic("sun", 13)} ${_t("Light")}</button>
+            <button data-action="set-theme" data-theme="dark" class="${theme === "dark" ? "on" : ""}">${ic("moon", 13)} ${_t("Dark")}</button>
+            <button data-action="set-theme" data-theme="system" class="${theme === "system" ? "on" : ""}">${ic("monitor", 13)} ${_t("System")}</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <div><div class="lbl">${_t("Language")}</div>
+            <div class="desc">${_t("Choose the language of the interface. Your saved data is not affected.")}</div></div>
+          <div class="seg">
+            <button data-action="set-lang" data-lang="en" class="${LANG === "en" ? "on" : ""}">EN</button>
+            <button data-action="set-lang" data-lang="nl" class="${LANG === "nl" ? "on" : ""}">NL</button>
           </div>
         </div>
       </div>
@@ -2408,7 +2507,7 @@ function taskFields(board) {
   return [
     { name: "title", label: "Task", type: "text", required: true, placeholder: "What needs to happen?" },
     { name: "description", label: "Details", type: "textarea", rows: 3, placeholder: "Context, acceptance criteria, links…" },
-    { name: "columnId", label: "Column", type: "select", half: true, full: false, options: board.columns.map(c => ({ value: c.id, label: c.name })) },
+    { name: "columnId", label: "Column", type: "select", half: true, full: false, raw: true, options: board.columns.map(c => ({ value: c.id, label: c.name })) },
     { name: "priority", label: "Priority", type: "select", half: true, full: false, options: PRIORITIES },
     { name: "assignee", label: "Assignee", type: "text", half: true, full: false, placeholder: "Name — becomes an initials badge" },
     { name: "due", label: "Due date", type: "date", half: true, full: false },
@@ -2759,6 +2858,20 @@ const ACTIONS = {
         location.reload();
       },
     });
+  },
+
+  /* ---------- language ---------- */
+  /* Display only: the choice lives in its own localStorage key, never in
+     S.settings, so nothing about the saved workspace changes. An open dialog
+     is closed rather than redrawn — a redraw would throw away unsaved typing. */
+  "set-lang"(el) {
+    const v = el.dataset.lang === "nl" ? "nl" : "en";
+    if (v === LANG) return;
+    LANG = v;
+    try { localStorage.setItem(LANG_KEY, v); } catch (e) { /* private mode */ }
+    closeAllModals();
+    applyLang();
+    render();
   },
 
   /* ---------- theme & settings ---------- */
@@ -3445,6 +3558,161 @@ window.addEventListener("beforeunload", ev => {
 });
 
 /* ============================================================================
+   18b. DUTCH CATALOG
+   ---------------------------------------------------------------------------
+   English text is the key; a missing entry simply renders the English. Kept at
+   the foot of the file so the program above stays readable in one pass.
+   Must appear above boot() — _t() reads NL lazily, but the const still has to
+   be initialised before the first render.
+
+   Agile vocabulary that Dutch teams already use in English (Sprint, Backlog,
+   Kanban, Product Owner, Retrospective, story points, WIP …) is deliberately
+   left untranslated: translating it reads as worse Dutch, not better.
+   ========================================================================= */
+/* The Dutch catalog. Agile vocabulary Dutch teams already use in English
+   (Sprint, Backlog, Kanban, Product Owner, Retrospective, story points …)
+   is deliberately left untranslated. */
+const NL = {
+  /* ---- shell, navigation, greeting ---- */
+  "Product Owner Workspace": "Product Owner Werkruimte",
+  "Workspace by Tonny Sluijs.": "Werkruimte van Tonny Sluijs.",
+  "Product Owner": "Product Owner",
+  "Overview": "Overzicht",
+  "Taskboard": "Takenbord",
+  "Decision Log": "Besluitenlog",
+  "Roadmap": "Roadmap",
+  "Backlog": "Backlog",
+  "Notes": "Notities",
+  "Documents": "Documenten",
+  "Goals": "Doelen",
+  "Retrospective": "Retrospective",
+  "Settings": "Instellingen",
+  "Search everything…": "Zoek overal…",
+  "Alerts": "Meldingen",
+  "Recent activity": "Recente activiteit",
+  "Open settings": "Instellingen openen",
+  "Good morning": "Goedemorgen",
+  "Good afternoon": "Goedemiddag",
+  "Good evening": "Goedenavond",
+  "Let's build something amazing today.": "Laten we vandaag iets moois bouwen.",
+  "Stay Focused!": "Blijf gefocust!",
+  "{done} of {total} tasks done": "{done} van {total} taken klaar",
+  "Small progress every day adds up to big results.":
+    "Elke dag een beetje vooruitgang levert samen een groot resultaat op.",
+  "Sprint": "Sprint",
+  "your data never leaves this machine": "je gegevens verlaten deze computer nooit",
+  "Built by Tonny Sluijs · free to use": "Gemaakt door Tonny Sluijs · vrij te gebruiken",
+
+  /* ---- appearance & language (Settings) ---- */
+  "Appearance": "Weergave",
+  "Theme": "Thema",
+  "Light": "Licht",
+  "Dark": "Donker",
+  "System": "Systeem",
+  "Language": "Taal",
+  "Choose the language of the interface. Your saved data is not affected.":
+    "Kies de taal van de interface. Je opgeslagen gegevens veranderen hier niet van.",
+
+  /* ---- common actions and chrome ---- */
+  "Save": "Opslaan",
+  "Cancel": "Annuleren",
+  "Delete": "Verwijderen",
+  "Edit": "Bewerken",
+  "Close": "Sluiten",
+  "Confirm": "Bevestigen",
+  "Create": "Aanmaken",
+  "Add": "Toevoegen",
+  "Add row": "Rij toevoegen",
+  "Remove row": "Rij verwijderen",
+  "Saving…": "Bezig met opslaan…",
+  "Saved": "Opgeslagen",
+  "Not saved": "Niet opgeslagen",
+  "{field} is required.": "{field} is verplicht.",
+  "comma, separated": "komma, gescheiden",
+  "task": "taak",
+  "tasks": "taken",
+  "{n} done": "{n} klaar",
+  "{n} overdue": "{n} te laat",
+
+  /* ---- stored enum values: the value stays English, only the label changes ---- */
+  "Proposed": "Voorgesteld",
+  "Pending": "In afwachting",
+  "Approved": "Goedgekeurd",
+  "Rejected": "Afgewezen",
+  "Superseded": "Vervangen",
+  "Low": "Laag",
+  "Medium": "Gemiddeld",
+  "High": "Hoog",
+  "Critical": "Kritiek",
+  "impact|Low": "Gering",
+  "impact|Medium": "Matig",
+  "impact|High": "Groot",
+  "impact|Critical": "Kritiek",
+  "{level} impact": "Impact: {level}",
+  "Planned": "Gepland",
+  "Active": "Actief",
+  "Done": "Klaar",
+  "At risk": "Risico",
+  "Yellow": "Geel",
+  "Blue": "Blauw",
+  "Green": "Groen",
+  "Pink": "Roze",
+  "Purple": "Paars",
+  "Grey": "Grijs",
+  "Orange": "Oranje",
+  "Red": "Rood",
+
+  /* ---- taskboard ---- */
+  "Your Kanban workspace.": "Je Kanban-werkruimte.",
+  "No board yet": "Nog geen bord",
+  "Create your first board. It starts with Backlog, To Do, In Progress, Review and Done — rename, recolour or delete any of them afterwards.":
+    "Maak je eerste bord aan. Het begint met Backlog, To Do, In Progress, Review en Done — je kunt ze daarna hernoemen, verkleuren of verwijderen.",
+  "Create board": "Bord aanmaken",
+  "Edit board": "Bord bewerken",
+  "New board": "Nieuw bord",
+  "New board…": "Nieuw bord…",
+  "New Task": "Nieuwe taak",
+  "Add Task": "Taak toevoegen",
+  "Board": "Bord",
+  "Switch board or create a new one": "Wissel van bord of maak een nieuw bord",
+  "Drag cards between columns, or use the arrows on a card.":
+    "Sleep kaarten tussen kolommen, of gebruik de pijltjes op een kaart.",
+  "Column": "Kolom",
+  "Move left": "Naar links",
+  "Move right": "Naar rechts",
+  "Work-in-progress limit": "WIP-limiet",
+  "No match here": "Hier niets gevonden",
+  "Drop tasks here": "Sleep taken hierheen",
+
+  /* ---- task & board forms ---- */
+  "Task": "Taak",
+  "What needs to happen?": "Wat moet er gebeuren?",
+  "Details": "Details",
+  "Context, acceptance criteria, links…": "Context, acceptatiecriteria, links…",
+  "Priority": "Prioriteit",
+  "Assignee": "Toegewezen aan",
+  "Name — becomes an initials badge": "Naam — wordt een badge met initialen",
+  "Due date": "Deadline",
+  "Tags": "Tags",
+  "discovery, api, must-have": "discovery, api, must-have",
+  "Board name": "Bordnaam",
+  "e.g. Product Development": "bijv. Productontwikkeling",
+  "Description": "Omschrijving",
+  "Optional one-liner": "Optionele korte omschrijving",
+  "Columns": "Kolommen",
+  "Add column": "Kolom toevoegen",
+  "Include this column": "Deze kolom meenemen",
+  "Include": "Meenemen",
+  "Column name": "Kolomnaam",
+  "Colour": "Kleur",
+  "Untick a column to leave it off this board, or remove the row entirely with ×.":
+    "Vink een kolom uit om hem van dit bord te laten, of verwijder de rij helemaal met ×.",
+  "Which column means finished?": "Welke kolom betekent klaar?",
+  "Tasks in this column are struck through and count towards the progress percentage.":
+    "Taken in deze kolom worden doorgestreept en tellen mee in het voortgangspercentage.",
+};
+
+/* ============================================================================
    19. BOOT
    ========================================================================= */
 async function start() {
@@ -3457,6 +3725,7 @@ async function start() {
 }
 
 async function boot() {
+  applyLang();
   let cfg = null;
   try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (e) { /* ignore */ }
 
