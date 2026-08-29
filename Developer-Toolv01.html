@@ -3169,9 +3169,17 @@ VIEWS.settings = function () {
           <div><div class="lbl">${_t("Theme")}</div>
             <div class="desc">“System” follows your Windows light/dark setting. Your choice is saved with the workspace.</div></div>
           <div class="seg">
-            <button data-action="set-theme" data-theme="light" class="${theme === "light" ? "on" : ""}">${ic("sun", 13)} Light</button>
-            <button data-action="set-theme" data-theme="dark" class="${theme === "dark" ? "on" : ""}">${ic("moon", 13)} Dark</button>
-            <button data-action="set-theme" data-theme="system" class="${theme === "system" ? "on" : ""}">${ic("monitor", 13)} System</button>
+            <button data-action="set-theme" data-theme="light" class="${theme === "light" ? "on" : ""}">${ic("sun", 13)} ${_t("Light")}</button>
+            <button data-action="set-theme" data-theme="dark" class="${theme === "dark" ? "on" : ""}">${ic("moon", 13)} ${_t("Dark")}</button>
+            <button data-action="set-theme" data-theme="system" class="${theme === "system" ? "on" : ""}">${ic("monitor", 13)} ${_t("System")}</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <div><div class="lbl">${_t("Language")}</div>
+            <div class="desc">${_t("Choose the language of the interface. Your saved data is not affected.")}</div></div>
+          <div class="seg">
+            <button data-action="set-lang" data-lang="en" class="${LANG === "en" ? "on" : ""}">EN</button>
+            <button data-action="set-lang" data-lang="nl" class="${LANG === "nl" ? "on" : ""}">NL</button>
           </div>
         </div>
       </div>
@@ -4576,7 +4584,7 @@ const NL = {
   "Milestone": "Mijlpaal",
   "Milestones": "Mijlpalen",
   "Decision": "Besluit",
-  "Decisions": "Beslissingen",
+  "Decisions": "Besluiten",
   "Document": "Document",
   "Boards": "Borden",
   "Backlog items": "Backlog-items",
@@ -5276,7 +5284,7 @@ const NL = {
   "Documentation only": "Alleen documentatie",
   "Tooling, pipeline or dependencies": "Tooling, pipeline of dependencies",
   "Everything else that does not touch src": "Al het overige dat src niet raakt",
-  "When to reach for it — and when not to.": "Wanneer je het inzet — en wanneer niet.",
+  "When to reach for it — and when not to.": "Wanneer je hem inzet — en wanneer niet.",
   "Jump to the search box": "Spring naar het zoekveld",
   "New task on the current board": "Nieuwe taak op het huidige bord",
   "Start a focus session": "Start een focussessie",
@@ -5294,6 +5302,7 @@ const NL = {
   "Untick a column to leave it off this board, or remove the row entirely with ×. ":
     "Vink een kolom uit om hem van dit bord te laten, of verwijder de rij helemaal met ×. ",
 };
+
 
 
 
