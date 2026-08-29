@@ -892,6 +892,10 @@ kbd{
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-3)"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5-5m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <input id="search" type="search" placeholder="Search everything…" autocomplete="off">
         </div>
+        <div class="seg" id="langSeg" title="Language / Taal">
+          <button data-action="set-lang" data-lang="en" class="on">EN</button>
+          <button data-action="set-lang" data-lang="nl">NL</button>
+        </div>
         <button class="icon-btn" data-action="toggle-panel" data-panel="alerts" title="Alerts" id="bellBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="pointer-events:none"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
         </button>
@@ -920,6 +924,86 @@ kbd{
    Storage keys are prefixed sm. so this never collides with the PO tool.
    ========================================================================= */
 "use strict";
+/* ============================================================================
+   0. LANGUAGE  (display only — never touches stored data)
+   ---------------------------------------------------------------------------
+   The catalog is keyed by the English source string, so anything not yet
+   translated renders in English instead of leaking a key. The chosen language
+   lives in its own localStorage entry, deliberately outside the workspace:
+   settings.json, the folder JSON and the export bundle are unchanged by
+   switching language.
+
+   Named _t because `t` is already the loop variable for "task" throughout.
+   ========================================================================= */
+const LANG_KEY = "sm.lang";
+let LANG = "en";
+try { LANG = localStorage.getItem(LANG_KEY) === "nl" ? "nl" : "en"; } catch (e) { LANG = "en"; }
+
+/* Add ?i18n=audit to the URL to bracket every translated string. Anything on
+   screen WITHOUT brackets is a literal that still needs wrapping. */
+const I18N_AUDIT = /[?&]i18n=audit/.test(location.search);
+const _missing = new Set();
+
+/**
+ * Translate one interface string. The English text is the key.
+ * Returns plain text — wrap in esc() exactly where the English literal was.
+ *   _t("Add task")
+ *   _t("Low", "impact")   // tries "impact|Low", then "Low"
+ */
+function _t(s, ctx) {
+  if (s === null || s === undefined || typeof s !== "string") return s;
+  let out = s;
+  if (LANG === "nl") {
+    const ck = ctx ? ctx + "|" + s : null;
+    if (ck && Object.prototype.hasOwnProperty.call(NL, ck)) out = NL[ck];
+    else if (Object.prototype.hasOwnProperty.call(NL, s)) out = NL[s];
+    else { if (s.trim()) _missing.add(ck || s); if (I18N_AUDIT) out = "\u00ab" + s + "\u00bb"; }
+  } else if (I18N_AUDIT && s.trim()) {
+    out = "[" + s + "]";
+  }
+  return out;
+}
+
+/** Translate with named placeholders, so Dutch may reorder them. */
+function _tp(s, vars) {
+  return String(_t(s)).replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m));
+}
+
+/** Console helper: which wrapped strings still have no Dutch. */
+window.__i18nMissing = () => Array.from(_missing).sort();
+
+/* Display labels for stored enum values. The VALUE stays an English identifier
+   in the data and in CSS class names; only what the user reads is translated. */
+const VALUE_LABELS = {
+  priority:  { low: "Low", medium: "Medium", high: "High", critical: "Critical" },
+  impact:    { low: "Low", medium: "Medium", high: "High", critical: "Critical" },
+  severity:  { low: "Low", medium: "Medium", high: "High", critical: "Critical" },
+  status:    { proposed: "Proposed", pending: "Pending", approved: "Approved", rejected: "Rejected", superseded: "Superseded" },
+};
+
+/** Display label for a stored enum value. `domain` doubles as the _t context. */
+function vlabel(domain, value) {
+  const v = String(value === null || value === undefined ? "" : value);
+  if (!v) return "";
+  const en = (VALUE_LABELS[domain] || {})[v] || (v[0].toUpperCase() + v.slice(1));
+  return _t(en, domain);
+}
+
+/** Apply the language to the parts of the shell that render() never repaints. */
+function applyLang() {
+  document.documentElement.lang = LANG;
+  document.title = "SM Dashboard — " + _t("Scrum Master Workspace") + " " + _t("by Tonny Sluijs");
+  const set = (sel, text) => { const el = $(sel); if (el) el.textContent = text; };
+  set(".brandinfo .sub", _t("Scrum Master Workspace"));
+  set(".brand-sub", _t("Workspace by Tonny Sluijs."));
+  const search = $("#search");
+  if (search) search.placeholder = _t("Search everything…");
+  const bell = $("#bellBtn"); if (bell) bell.title = _t("Alerts");
+  const act = $('[data-panel="activity"]'); if (act) act.title = _t("Recent activity");
+  const chip = $(".user-chip"); if (chip) chip.title = _t("Open settings");
+  $$("#langSeg button").forEach(b => b.classList.toggle("on", b.dataset.lang === LANG));
+}
+
 /* ============================================================================
    1. UTILITIES
    ========================================================================= */
@@ -995,7 +1079,9 @@ function avatar(name, size) {
   const bg = "linear-gradient(135deg,hsl(" + h + ",62%,54%),hsl(" + ((h + 38) % 360) + ",62%,44%))";
   return '<span class="avatar ' + (size || "") + '" style="background:' + bg + '" title="' + esc(name) + '">' + esc(initials(name)) + "</span>";
 }
-function pluralise(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+function pluralise(n, one, many) {
+  return n + " " + (n === 1 ? _t(one) : (many ? _t(many) : _t(one + "s")));
+}
 function sortBy(arr, fn, dir) {
   return arr.slice().sort((a, b) => {
     const x = fn(a), y = fn(b);
@@ -1341,7 +1427,7 @@ async function flush() {
   } catch (e) {
     keys.forEach(k => dirty.add(k));
     setSaveState("error");
-    toast("Could not save: " + (e && e.message ? e.message : e), "err", 7000);
+    toast(_tp("Could not save: {msg}", { msg: (e && e.message ? e.message : e) }), "err", 7000);
   } finally {
     saving = false;
     if (dirty.size) scheduleSave();
@@ -1419,7 +1505,7 @@ function repairBoards() {
   if (!fixed.length) return;
   markDirty("boards");
   setTimeout(() => {
-    toast("Finished column corrected: " + fixed.join(", ") + ".", "warn", 7000);
+    toast(_tp("Finished column corrected: {cols}.", { cols: fixed.join(", ") }), "warn", 7000);
   }, 700);
 }
 
@@ -1462,7 +1548,7 @@ function toast(message, kind, ms) {
   const el = document.createElement("div");
   el.className = "toast " + (kind || "ok");
   const iconName = kind === "err" ? "alert" : kind === "warn" ? "info" : "checkCircle";
-  el.innerHTML = ic(iconName, 16) + "<span>" + esc(message) + "</span>";
+  el.innerHTML = ic(iconName, 16) + "<span>" + esc(_t(message)) + "</span>";
   host.appendChild(el);
   setTimeout(() => {
     el.style.transition = "opacity .25s,transform .25s";
@@ -1506,10 +1592,10 @@ function openModal(opts) {
     '<div class="overlay" data-overlay>' +
       '<form class="modal ' + (opts.width || "") + '" id="modalForm" autocomplete="off">' +
         '<div class="modal-head">' +
-          "<div><h3>" + esc(opts.title) + "</h3>" +
-            (opts.subtitle ? "<p>" + esc(opts.subtitle) + "</p>" : "") +
+          "<div><h3>" + esc(_t(opts.title)) + "</h3>" +
+            (opts.subtitle ? "<p>" + esc(_t(opts.subtitle)) + "</p>" : "") +
           "</div>" +
-          '<button type="button" class="close-x" data-action="modal-close" aria-label="Close">' + ic("x", 17) + "</button>" +
+          '<button type="button" class="close-x" data-action="modal-close" aria-label="' + esc(_t("Close")) + '">' + ic("x", 17) + "</button>" +
         "</div>" +
         '<div class="modal-body">' +
           (opts.topHTML || "") +
@@ -1518,8 +1604,8 @@ function openModal(opts) {
         "</div>" +
         '<div class="modal-foot">' +
           (opts.footLeftHTML ? '<div class="spacer" style="text-align:left">' + opts.footLeftHTML + "</div>" : '<div class="spacer"></div>') +
-          '<button type="button" class="btn btn-ghost" data-action="modal-close">' + esc(opts.cancelLabel || "Cancel") + "</button>" +
-          (opts.onSave ? '<button type="submit" class="btn btn-primary">' + esc(opts.saveLabel || "Save") + "</button>" : "") +
+          '<button type="button" class="btn btn-ghost" data-action="modal-close">' + esc(_t(opts.cancelLabel || "Cancel")) + "</button>" +
+          (opts.onSave ? '<button type="submit" class="btn btn-primary">' + esc(_t(opts.saveLabel || "Save")) + "</button>" : "") +
         "</div>" +
       "</form>" +
     "</div>";
@@ -1547,25 +1633,25 @@ function openModal(opts) {
 function fieldHTML(f, value) {
   if (f.type === "static") {
     return '<div class="field ' + (f.full === false ? "" : "full") + '">' +
-      (f.label ? "<label>" + esc(f.label) + "</label>" : "") + (f.html || "") + "</div>";
+      (f.label ? "<label>" + esc(_t(f.label)) + "</label>" : "") + (f.html || "") + "</div>";
   }
   const id = "f_" + f.name;
   const cls = "field" + (f.full === false ? "" : (f.half ? "" : " full"));
-  const label = '<label for="' + id + '">' + esc(f.label) + (f.required ? ' <span class="req">*</span>' : "") + "</label>";
-  const hint = f.hint ? '<span class="hint">' + esc(f.hint) + "</span>" : "";
+  const label = '<label for="' + id + '">' + esc(_t(f.label)) + (f.required ? ' <span class="req">*</span>' : "") + "</label>";
+  const hint = f.hint ? '<span class="hint">' + esc(_t(f.hint)) + "</span>" : "";
   let input = "";
 
   switch (f.type) {
     case "textarea":
       input = '<textarea class="inp" id="' + id + '" name="' + f.name + '" rows="' + (f.rows || 3) +
-        '" placeholder="' + esc(f.placeholder || "") + '">' + esc(value || "") + "</textarea>";
+        '" placeholder="' + esc(_t(f.placeholder) || "") + '">' + esc(value || "") + "</textarea>";
       break;
     case "select":
       input = '<select class="sel" id="' + id + '" name="' + f.name + '">' +
         (f.options || []).map(o => {
           const ov = typeof o === "string" ? o : o.value;
           const ol = typeof o === "string" ? o : o.label;
-          return '<option value="' + esc(ov) + '"' + (String(value) === String(ov) ? " selected" : "") + ">" + esc(ol) + "</option>";
+          return '<option value="' + esc(ov) + '"' + (String(value) === String(ov) ? " selected" : "") + ">" + esc(f.raw ? ol : _t(ol)) + "</option>";
         }).join("") + "</select>";
       break;
     case "date":
@@ -1582,12 +1668,12 @@ function fieldHTML(f, value) {
     case "checkbox":
       return '<div class="' + cls + '"><label class="row" style="cursor:pointer;font-weight:600">' +
         '<input type="checkbox" name="' + f.name + '" ' + (value ? "checked" : "") +
-        ' style="width:15px;height:15px;accent-color:var(--primary)"> ' + esc(f.label) + "</label>" + hint + "</div>";
+        ' style="width:15px;height:15px;accent-color:var(--primary)"> ' + esc(_t(f.label)) + "</label>" + hint + "</div>";
     case "repeater":
       return '<div class="' + cls + '">' + label + repeaterHTML(f, value) + hint + "</div>";
     default:
       input = '<input class="inp" type="text" id="' + id + '" name="' + f.name + '" value="' + esc(value || "") +
-        '" placeholder="' + esc(f.placeholder || "") + '">';
+        '" placeholder="' + esc(_t(f.placeholder) || "") + '">';
   }
   return '<div class="' + cls + '">' + label + input + hint + "</div>";
 }
@@ -1624,7 +1710,7 @@ function repeaterRow(f, v) {
         (s.options || []).map(o => {
           const ov = typeof o === "string" ? o : o.value;
           const ol = typeof o === "string" ? o : o.label;
-          return '<option value="' + esc(ov) + '"' + (String(v[s.name]) === String(ov) ? " selected" : "") + ">" + esc(ol) + "</option>";
+          return '<option value="' + esc(ov) + '"' + (String(v[s.name]) === String(ov) ? " selected" : "") + ">" + esc(_t(ol)) + "</option>";
         }).join("") + "</select>";
     }
     const type = s.type === "date" || s.type === "number" ? s.type : "text";
@@ -1637,7 +1723,7 @@ function repeaterRow(f, v) {
   const check = !f.checkKey ? ""
     : f.headers ? '<span class="rep-check-cell">' + box + "</span>" : box;
   return '<div class="rep-row">' + check + inputs +
-    '<button type="button" class="rep-del" data-action="rep-del" title="Remove row">' + ic("x", 14) + "</button></div>";
+    '<button type="button" class="rep-del" data-action="rep-del" title="' + esc(_t("Remove row")) + '">' + ic("x", 14) + "</button></div>";
 }
 
 function collectForm(form, fields) {
@@ -1675,19 +1761,19 @@ function confirmDialog(opts) {
           '<button type="button" class="close-x" data-action="modal-close">' + ic("x", 17) + "</button></div>" +
         '<div class="modal-body"><p style="font-size:13px;line-height:1.65;color:var(--text-2)">' + (opts.messageHTML || esc(opts.message)) + "</p>" +
           (opts.requireText
-            ? '<div class="field" style="margin-top:14px"><label>Type <b>' + esc(opts.requireText) +
-              '</b> to confirm</label><input class="inp" name="confirmText" placeholder="' + esc(opts.requireText) + '"></div>'
+            ? '<div class="field" style="margin-top:14px"><label>' + _tp("Type {word} to confirm", { word: "<b>" + esc(opts.requireText) + "</b>" }) +
+              '</label><input class="inp" name="confirmText" placeholder="' + esc(opts.requireText) + '"></div>'
             : "") +
         "</div>" +
-        '<div class="modal-foot"><button type="button" class="btn btn-ghost" data-action="modal-close">Cancel</button>' +
+        '<div class="modal-foot"><button type="button" class="btn btn-ghost" data-action="modal-close">' + esc(_t("Cancel")) + "</button>" +
           '<button type="submit" class="btn ' + (opts.danger ? "btn-danger" : "btn-primary") + '">' +
-          esc(opts.confirmLabel || "Confirm") + "</button></div>" +
+          esc(_t(opts.confirmLabel || "Confirm")) + "</button></div>" +
       "</form></div>";
   $("#modalForm").addEventListener("submit", ev => {
     ev.preventDefault();
     if (opts.requireText) {
       const typed = $('[name="confirmText"]').value.trim();
-      if (typed !== opts.requireText) { toast("Type " + opts.requireText + " exactly to confirm.", "warn"); return; }
+      if (typed !== opts.requireText) { toast(_tp("Type {word} exactly to confirm.", { word: opts.requireText }), "warn"); return; }
     }
     closeAllModals();
     opts.onConfirm();
@@ -1710,24 +1796,24 @@ function openWizard() {
             '<polygon points="24,6 38,14 24,22 10,14" fill="url(#g1)"/>' +
             '<polygon points="10,14 24,22 24,38 10,30" fill="url(#g2)"/>' +
             '<polygon points="24,22 38,14 38,30 24,38" fill="url(#g3)"/></svg>' +
-          "<h2>Welcome to your Scrum Master Dashboard</h2>" +
+          "<h2>" + esc(_t('Welcome to your Scrum Master Dashboard')) + "</h2>" +
           "<p>Everything you create stays on this machine. Choose where it should live — you can switch later in Settings.</p>" +
         "</div>" +
         '<div class="modal-body stack">' +
           '<button class="choice" data-action="wiz-local">' +
             '<span class="ic">' + ic("browser", 21) + "</span>" +
-            "<span><h4>Store in this browser</h4>" +
+            "<span><h4>" + esc(_t('Store in this browser')) + "</h4>" +
             "<p>Saved instantly to this browser's local storage. Nothing to set up — but the data is tied to this browser profile and is lost if you clear site data.</p></span>" +
           "</button>" +
           '<button class="choice' + (supported ? "" : " off") + '" ' + (supported ? 'data-action="wiz-folder"' : "disabled") + ">" +
             '<span class="ic">' + ic("folder", 21) + "</span>" +
-            "<span><h4>Store in a folder on my computer</h4>" +
-            "<p>Each section is written as its own readable JSON file — <code>sprints.json</code>, <code>impediments.json</code>, and so on. " +
-            "If the folder already contains a workspace, it is loaded, never wiped. Back it up or sync it however you like.</p></span>" +
+            "<span><h4>" + esc(_t('Store in a folder on my computer')) + "</h4>" +
+            "<p>" + _t("Each section is written as its own readable JSON file — <code>sprints.json</code>, <code>impediments.json</code>, and so on.") + " " +
+            _t("If the folder already contains a workspace, it is loaded, never wiped. Back it up or sync it however you like.") + "</p></span>" +
           "</button>" +
           (supported ? "" :
             '<div class="notice">' + ic("alert", 16) +
-            "<span><b>Folder storage is unavailable in this browser.</b> It needs Chrome or Edge. " +
+            "<span><b>" + esc(_t('Folder storage is unavailable in this browser.')) + "</b> It needs Chrome or Edge. " +
             "If you are already in Chrome, open this file through a local server " +
             "(<code>python -m http.server</code> in this folder, then visit <code>localhost:8000/ScrumMaster-Toolv01.html</code>) and the option will appear.</span></div>") +
           '<div class="notice info">' + ic("info", 16) +
@@ -1742,12 +1828,12 @@ function openReconnect(handle) {
   const host = $("#modalHost");
   host.innerHTML =
     '<div class="overlay"><div class="modal narrow">' +
-      '<div class="modal-head"><div><h3>Reconnect your workspace folder</h3>' +
-        "<p>Browsers ask again each session before a page may touch your files.</p></div></div>" +
+      '<div class="modal-head"><div><h3>' + esc(_t("Reconnect your workspace folder")) + '</h3>' +
+        "<p>" + esc(_t('Browsers ask again each session before a page may touch your files.')) + "</p></div></div>" +
       '<div class="modal-body stack">' +
-        '<div class="notice info">' + ic("folder", 16) + "<span>Folder: <b>" + esc(handle.name) + "</b></span></div>" +
+        '<div class="notice info">' + ic("folder", 16) + "<span>" + esc(_t("Folder:")) + " <b>" + esc(handle.name) + "</b></span></div>" +
         '<button class="btn btn-primary btn-block" data-action="reconnect">' + ic("folder", 15) + "Reconnect and load my data</button>" +
-        '<button class="btn btn-ghost btn-block" data-action="wiz-open">Choose a different location instead</button>' +
+        '<button class="btn btn-ghost btn-block" data-action="wiz-open">' + esc(_t("Choose a different location instead")) + '</button>' +
       "</div></div></div>";
   window.__pendingHandle = handle;
 }
@@ -1809,8 +1895,8 @@ function render() {
 function renderNav() {
   $("#nav").innerHTML = NAV.map(n => {
     const c = navCount(n.id);
-    return '<button class="nav-item' + (ui.view === n.id ? " active" : "") + '" data-action="go" data-view="' + n.id + '" title="' + esc(n.label) + '">' +
-      ic(n.icon, 18) + '<span class="lbl">' + esc(n.label) + "</span>" +
+    return '<button class="nav-item' + (ui.view === n.id ? " active" : "") + '" data-action="go" data-view="' + n.id + '" title="' + esc(_t(n.label)) + '">' +
+      ic(n.icon, 18) + '<span class="lbl">' + esc(_t(n.label)) + "</span>" +
       (c ? '<span class="count">' + c + "</span>" : "") + "</button>";
   }).join("");
 }
@@ -1836,8 +1922,8 @@ function renderTopbar() {
 /** Sits under every view. Free to use, so the credit travels with it. */
 function appFooter() {
   return '<footer class="app-foot">' +
-    "<span>SM Dashboard — <b>Scrum Master Workspace</b> · your data never leaves this machine</span>" +
-    '<span class="credit">Built by Tonny Sluijs · free to use</span>' +
+    "<span>SM Dashboard — <b>" + esc(_t('Scrum Master Workspace')) + "</b> · your data never leaves this machine</span>" +
+    '<span class="credit">' + esc(_t("Built by Tonny Sluijs · free to use")) + '</span>' +
     "</footer>";
 }
 
@@ -1854,18 +1940,19 @@ function renderFocusCard() {
 
   if (!sprint) {
     $("#focusCard").innerHTML = stars +
-      "<h4>No Sprint running</h4>" +
-      "<p>Start a Sprint and this card counts the days down for you.</p>" +
-      '<button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="go" data-view="sprints">Plan a Sprint</button>';
+      "<h4>" + esc(_t('No Sprint running')) + "</h4>" +
+      "<p>" + esc(_t('Start a Sprint and this card counts the days down for you.')) + "</p>" +
+      '<button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="go" data-view="sprints">' + esc(_t("Plan a Sprint")) + '</button>';
     return;
   }
   const left = days.length ? Math.max(0, days.length - dayNo) : 0;
   $("#focusCard").innerHTML = stars +
     "<h4>" + esc(sprint.name) + "</h4>" +
-    "<p>" + (days.length ? "Day " + dayNo + " of " + days.length + " · " + pluralise(left, "working day") + " left" : "No dates set on this Sprint") + "</p>" +
-    '<div class="focus-stat"><span>Done</span><span>' + st.done + "/" + st.total + " " + esc(st.unit) + "</span></div>" +
+    "<p>" + esc(days.length ? _tp("Day {n} of {total} · {left} left", { n: dayNo, total: days.length, left: pluralise(left, "working day") })
+                            : _t("No dates set on this Sprint")) + "</p>" +
+    '<div class="focus-stat"><span>' + esc(_t("Done")) + '</span><span>' + st.done + "/" + st.total + " " + esc(st.unit) + "</span></div>" +
     '<div class="focus-bar"><span style="width:' + st.percent + '%"></span></div>' +
-    '<div class="focus-stat"><span>Impediments</span><span>' + open + (aged ? " (" + aged + " aging)" : "") + "</span></div>" +
+    '<div class="focus-stat"><span>' + esc(_t("Impediments")) + '</span><span>' + open + (aged ? " (" + aged + " aging)" : "") + "</span></div>" +
     '<div class="focus-bar"><span style="width:' + (open ? Math.min(100, open * 20) : 0) +
       '%;background:linear-gradient(90deg,' + (aged ? "#f87171,#ef4444" : "#fbbf24,#f472b6") + ')"></span></div>';
 }
@@ -2215,13 +2302,13 @@ function matchText() {
    11. SHARED VIEW FRAGMENTS
    ========================================================================= */
 function pageHead(title, sub, actionsHTML) {
-  return '<div class="page-head"><div><h2>' + esc(title) + "</h2>" +
-    (sub ? "<p>" + esc(sub) + "</p>" : "") + "</div>" +
+  return '<div class="page-head"><div><h2>' + esc(_t(title)) + "</h2>" +
+    (sub ? "<p>" + esc(_t(sub)) + "</p>" : "") + "</div>" +
     '<div class="page-actions">' + (actionsHTML || "") + "</div></div>";
 }
 function emptyState(icon, title, text, actionHTML, small) {
   return '<div class="empty' + (small ? " sm" : "") + '"><span class="ic">' + ic(icon, small ? 18 : 24) + "</span>" +
-    "<h4>" + esc(title) + "</h4>" + (text ? "<p>" + esc(text) + "</p>" : "") +
+    "<h4>" + esc(_t(title)) + "</h4>" + (text ? "<p>" + esc(_t(text)) + "</p>" : "") +
     (actionHTML ? '<div style="margin-top:6px">' + actionHTML + "</div>" : "") + "</div>";
 }
 function statusBadge(status) {
@@ -2264,7 +2351,7 @@ function burndownSVG(sprint, compact) {
   const days = sprintDayList(sprint);
   const st = sprintStats(sprint);
   if (!days.length) {
-    return '<p class="tiny dim" style="padding:14px 0">Give this Sprint a start and end date and the burndown draws itself.</p>';
+    return '<p class="tiny dim" style="padding:14px 0">' + esc(_t("Give this Sprint a start and end date and the burndown draws itself.")) + '</p>';
   }
   const W = 320, H = compact ? 108 : 168, L = 26, R = 8, T = 10, B = 20;
   const plotW = W - L - R, plotH = H - T - B;
@@ -2297,11 +2384,11 @@ function burndownSVG(sprint, compact) {
     return '<text class="axis" x="' + x(i) + '" y="' + (H - 6) + '" text-anchor="middle">' + (i + 1) + "</text>";
   }).join("");
 
-  return '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Sprint burndown">' +
+  return '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(_t("Sprint burndown")) + '">' +
     grid + '<polyline class="ideal" points="' + ideal + '"/>' + area + actual + dots + ticks + "</svg>" +
-    (compact ? "" : '<div class="chart-legend"><span><i style="background:var(--text-3)"></i>Ideal</span>' +
-      '<span><i style="background:var(--primary)"></i>Actual (' + esc(st.unit) + ' left)</span>' +
-      '<span class="dim">Working day →</span></div>');
+    (compact ? "" : '<div class="chart-legend"><span><i style="background:var(--text-3)"></i>' + esc(_t("Ideal")) + '</span>' +
+      '<span><i style="background:var(--primary)"></i>' + esc(_tp("Actual ({unit} left)", { unit: st.unit })) + '</span>' +
+      '<span class="dim">' + esc(_t("Working day →")) + '</span></div>');
 }
 
 /** One bar per closed Sprint, with the average across them. */
@@ -2334,9 +2421,9 @@ function velocitySVG(sprints) {
   const avgY = T + plotH - (avg / top) * plotH;
   const avgLine = '<line class="avgline" x1="' + L + '" y1="' + avgY + '" x2="' + (W - R) + '" y2="' + avgY + '"/>';
 
-  return '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Velocity per Sprint">' +
+  return '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(_t("Velocity per Sprint")) + '">' +
     grid + bars + avgLine + "</svg>" +
-    '<div class="chart-legend"><span><i style="background:var(--primary)"></i>Delivered</span>' +
+    '<div class="chart-legend"><span><i style="background:var(--primary)"></i>' + esc(_t("Delivered")) + '</span>' +
     '<span><i style="background:var(--amber)"></i>Average ' + avg + "</span></div>";
 }
 /** "Sprint 14" → "14" so the axis labels stay readable. */
@@ -2361,11 +2448,11 @@ function taskCard(t, board, col) {
       <div class="row" style="align-items:flex-start;gap:8px">
         ${isFinished ? `<span class="check">${ic("check", 11, 3.2)}</span>` : ""}
         <span class="t ${isFinished ? "done" : ""} grow">${esc(t.title)}</span>
-        ${pts ? `<span class="pts" title="Story points">${pts}</span>` : ""}
+        ${pts ? `<span class="pts" title="${_t("Story points")}">${pts}</span>` : ""}
       </div>
       ${t.blocked && !isFinished ? `<div class="blocked-row">
         <span class="grow">${ic("alert", 11, 2.6)}${esc(t.blockedReason || "Blocked")}</span>
-        <button data-action="raise-from-task" data-task-id="${t.id}" title="Raise this as an impediment">${ic("upload", 12, 2.6)}</button>
+        <button data-action="raise-from-task" data-task-id="${t.id}" title="${_t("Raise this as an impediment")}">${ic("upload", 12, 2.6)}</button>
       </div>` : ""}
       ${tags.length ? `<div class="row wrap" style="gap:4px">${tags.map(x => `<span class="tag">${esc(x)}</span>`).join("")}</div>` : ""}
       <div class="task-foot">
@@ -2375,8 +2462,8 @@ function taskCard(t, board, col) {
           ${t.assignee ? avatar(t.assignee) : ""}
           ${t.due ? `<span class="task-meta ${late ? "late" : ""}">${late ? ic("alert", 11, 2.4) : ""}${esc(fmtShort(t.due))}</span>` : ""}
           <span class="task-move">
-            <button data-action="move-task" data-dir="-1" data-task-id="${t.id}" title="Move left" aria-label="Move left">${ic("chevL", 12, 2.6)}</button>
-            <button data-action="move-task" data-dir="1" data-task-id="${t.id}" title="Move right" aria-label="Move right">${ic("chevR", 12, 2.6)}</button>
+            <button data-action="move-task" data-dir="-1" data-task-id="${t.id}" title="${_t("Move left")}" aria-label="${_t("Move left")}">${ic("chevL", 12, 2.6)}</button>
+            <button data-action="move-task" data-dir="1" data-task-id="${t.id}" title="${_t("Move right")}" aria-label="${_t("Move right")}">${ic("chevR", 12, 2.6)}</button>
           </span>
         </div>
       </div>
@@ -2396,7 +2483,7 @@ function kanbanHTML(board, compact) {
     return `<div class="kcol ${compact ? "compact" : ""}" data-accent="${esc(col.accent || "slate")}" data-col-id="${col.id}" data-drop-col="${col.id}">
         <div class="kcol-head">
           <span class="name grow truncate">${esc(col.name)}</span>
-          ${pts ? `<span class="mini dim" title="Story points in this column">${pts}p</span>` : ""}
+          ${pts ? `<span class="mini dim" title="${_t("Story points in this column")}">${pts}p</span>` : ""}
           ${col.wip ? `<span class="mini bold ${over ? "over" : "dim"}" title="Work-in-progress limit${over ? " exceeded" : ""}">${all}/${col.wip}</span>` : ""}
           <span class="n">${all}</span>
         </div>
@@ -2415,7 +2502,7 @@ function boardSelector() {
   const boards = S.boards.items;
   const active = activeBoard();
   if (!boards.length) return "";
-  return `<select class="sel sel-auto" data-action="set-board" title="Switch board or create a new one">
+  return `<select class="sel sel-auto" data-action="set-board" title="${_t("Switch board or create a new one")}">
       ${boards.map(b => `<option value="${b.id}" ${active && b.id === active.id ? "selected" : ""}>Board: ${esc(b.name)}${tracksSprint(b) ? "" : " (private)"}</option>`).join("")}
       <option disabled>──────────</option>
       <option value="${NEW_BOARD_OPTION}">+ New board…</option>
@@ -2469,7 +2556,7 @@ VIEWS.overview = function () {
       <div class="card">
         <div class="card-head">
           <div class="card-title"><span class="tile-icon">${ic("board", 18, 2.2)}</span>
-            <div><h3>${esc(board ? board.name : "Sprint Board")}${board && !tracksSprint(board) ? ` <span class="badge b-neutral">Private</span>` : ""}</h3>
+            <div><h3>${esc(board ? board.name : "Sprint Board")}${board && !tracksSprint(board) ? ` <span class="badge b-neutral">${_t("Private")}</span>` : ""}</h3>
               <span class="sub">${board
                 ? esc(pluralise(st.total, "card")) + " · " + st.percent + "% finished" +
                   (boardCount > 1 ? " · " + boardCount + " boards" : "")
@@ -2477,8 +2564,8 @@ VIEWS.overview = function () {
           </div>
           <div class="row">
             ${boardSelector()}
-            ${board ? `<button class="icon-btn sq" data-action="new-task" title="Add task">${ic("plus", 15, 2.4)}</button>
-            <button class="icon-btn sq" data-action="go" data-view="taskboard" title="Open full board">${ic("external", 14)}</button>` : ""}
+            ${board ? `<button class="icon-btn sq" data-action="new-task" title="${_t("Add task")}">${ic("plus", 15, 2.4)}</button>
+            <button class="icon-btn sq" data-action="go" data-view="taskboard" title="${_t("Open full board")}">${ic("external", 14)}</button>` : ""}
           </div>
         </div>
         ${board ? kanbanHTML(board, true)
@@ -2486,19 +2573,19 @@ VIEWS.overview = function () {
             "Create your first board. You can keep as many as you like — one per team, plus a private one for your own Scrum Master work.",
             `<button class="btn btn-primary" data-action="new-board">${ic("plus", 14)}Create board</button>`)}
         ${board && boardCount === 1 ? `<p class="mini dim" style="text-align:center;padding-top:12px">
-          Need somewhere for your own work? <button class="link" data-action="new-board">Add a second board</button> — the dropdown switches between them.</p>` : ""}
+          Need somewhere for your own work? <button class="link" data-action="new-board">${_t("Add a second board")}</button> — the dropdown switches between them.</p>` : ""}
       </div>
 
       <!-- Impediments -->
       <div class="card">
         <div class="card-head">
           <div class="card-title"><span class="tile-icon" style="background:var(--red-weak);color:var(--red)">${ic("alert", 18, 2.2)}</span>
-            <div><h3>In the way</h3>
+            <div><h3>${_t("In the way")}</h3>
               <span class="sub">${impediments.length ? esc(pluralise(openImpediments().length, "open impediment")) + (agedCount ? " · " + agedCount + " aging" : "") : "Nothing blocking the team"}</span></div>
           </div>
           <div class="row">
             <button class="btn btn-primary btn-sm" data-action="new-impediment">${ic("plus", 12)}Raise</button>
-            <button class="icon-btn sq" data-action="go" data-view="impediments" title="Open the register">${ic("external", 14)}</button>
+            <button class="icon-btn sq" data-action="go" data-view="impediments" title="${_t("Open the register")}">${ic("external", 14)}</button>
           </div>
         </div>
         ${impediments.length ? `<div class="stack-sm">${impediments.map(i => `
@@ -2520,9 +2607,9 @@ VIEWS.overview = function () {
       <div class="card">
         <div class="card-head">
           <div class="card-title"><span class="tile-icon" style="background:var(--blue-weak);color:var(--blue)">${ic("history", 18, 2.2)}</span>
-            <div><h3>Improvements not yet made</h3><span class="sub">Retro actions still open — the ones that quietly disappear</span></div>
+            <div><h3>${_t("Improvements not yet made")}</h3><span class="sub">${_t("Retro actions still open — the ones that quietly disappear")}</span></div>
           </div>
-          <button class="icon-btn sq" data-action="go" data-view="retrospective" title="Open retrospectives">${ic("external", 14)}</button>
+          <button class="icon-btn sq" data-action="go" data-view="retrospective" title="${_t("Open retrospectives")}">${ic("external", 14)}</button>
         </div>
         ${retroActions.length ? `<div class="stack-sm">${retroActions.map(x => `
           <div class="retro-line">
@@ -2530,7 +2617,7 @@ VIEWS.overview = function () {
               style="width:14px;height:14px;accent-color:var(--primary);margin-top:2px">
             <span class="grow">${esc(x.action.text)}
               <span class="mini dim"> · ${esc(x.retro.title)}${x.action.owner ? " · " + esc(x.action.owner) : ""}${x.date ? " · " + esc(fmtShort(x.date)) : ""}</span></span>
-            <button data-action="promote-retro-action" data-id="${x.retro.id}" data-index="${x.index}" title="Put it on the board">${ic("upload", 13)}</button>
+            <button data-action="promote-retro-action" data-id="${x.retro.id}" data-index="${x.index}" title="${_t("Put it on the board")}">${ic("upload", 13)}</button>
           </div>`).join("")}</div>`
           : emptyState("checkCircle", "Nothing outstanding",
             "Every action from your retrospectives has been ticked off. That is rarer than it sounds.", "", true)}
@@ -2540,11 +2627,11 @@ VIEWS.overview = function () {
       <div class="card">
         <div class="card-head">
           <div class="card-title"><span class="tile-icon">${ic("scale", 18, 2.2)}</span>
-            <div><h3>Decision Log</h3><span class="sub">What was decided, by whom, and why</span></div>
+            <div><h3>${_t("Decision Log")}</h3><span class="sub">${_t("What was decided, by whom, and why")}</span></div>
           </div>
           <div class="row">
             <button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}New Decision</button>
-            <button class="icon-btn sq" data-action="go" data-view="decisions" title="Open decision log">${ic("external", 14)}</button>
+            <button class="icon-btn sq" data-action="go" data-view="decisions" title="${_t("Open decision log")}">${ic("external", 14)}</button>
           </div>
         </div>
         ${decisions.length ? decisionTable(decisions, true)
@@ -2559,7 +2646,7 @@ VIEWS.overview = function () {
         <div class="card" style="padding:16px">
           <div class="row" style="gap:8px;margin-bottom:12px">
             <span class="tile-icon sm" style="background:var(--green-weak);color:var(--green)">${ic("smile", 15)}</span>
-            <h4 style="font-size:12.5px;font-weight:700">Team Health</h4>
+            <h4 style="font-size:12.5px;font-weight:700">${_t("Team Health")}</h4>
           </div>
           ${latest ? `
             <p class="mini dim bold" style="text-transform:uppercase;letter-spacing:.05em">${esc(fmtDate(latest.date))}</p>
@@ -2568,7 +2655,7 @@ VIEWS.overview = function () {
               <span class="tiny dim">out of 5</span>
             </div>
             <p class="tiny muted" style="margin-top:6px">${esc(pluralise((latest.scores || []).length, "person"))} asked</p>`
-            : `<p class="tiny dim" style="line-height:1.6">No health check taken yet.</p>`}
+            : `<p class="tiny dim" style="line-height:1.6">${_t("No health check taken yet.")}</p>`}
           <div class="spacer"></div>
           <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="new-health">${ic("plus", 12, 2.6)}New check</button>
         </div>
@@ -2576,12 +2663,12 @@ VIEWS.overview = function () {
         <div class="card" style="padding:16px">
           <div class="row" style="gap:8px;margin-bottom:12px">
             <span class="tile-icon sm" style="background:var(--amber-weak);color:var(--amber)">${ic("note", 15)}</span>
-            <h4 style="font-size:12.5px;font-weight:700">Notes &amp; Reminders</h4>
+            <h4 style="font-size:12.5px;font-weight:700">${_t("Notes &amp; Reminders")}</h4>
           </div>
           ${notes.length ? `<div class="sticky-note sn-yellow" style="min-height:0;padding:10px 11px;gap:6px">
               ${notes.map((n, i) => `${i ? '<div style="height:1px;background:rgba(180,140,20,.25)"></div>' : ""}
                 <div class="mini" style="line-height:1.5">${esc(n.text.slice(0, 62))}${n.text.length > 62 ? "…" : ""}</div>`).join("")}
-            </div>` : `<p class="tiny dim" style="line-height:1.6">Nothing noted down yet.</p>`}
+            </div>` : `<p class="tiny dim" style="line-height:1.6">${_t("Nothing noted down yet.")}</p>`}
           <div class="spacer"></div>
           <button class="link" style="margin-top:12px" data-action="new-note">${ic("plus", 12, 2.6)}Add Note</button>
         </div>
@@ -2589,12 +2676,12 @@ VIEWS.overview = function () {
         <div class="card" style="padding:16px">
           <div class="row" style="gap:8px;margin-bottom:12px">
             <span class="tile-icon sm" style="background:var(--red-weak);color:var(--red)">${ic("alert", 15)}</span>
-            <h4 style="font-size:12.5px;font-weight:700">Risk Monitor</h4>
+            <h4 style="font-size:12.5px;font-weight:700">${_t("Risk Monitor")}</h4>
           </div>
-          ${risks.length ? `<div class="stack-sm">${risks.map(r => `<button class="row-between" style="gap:6px;width:100%;text-align:left" data-action="edit-risk" data-id="${r.id}" title="Edit risk">
+          ${risks.length ? `<div class="stack-sm">${risks.map(r => `<button class="row-between" style="gap:6px;width:100%;text-align:left" data-action="edit-risk" data-id="${r.id}" title="${_t("Edit risk")}">
               <span class="mini bold truncate" style="color:var(--text-2)">• ${esc(r.title)}</span>
               <span class="badge b-${esc(r.level || "low")}">${esc((r.level || "low")[0].toUpperCase() + (r.level || "low").slice(1))}</span></button>`).join("")}</div>`
-            : `<p class="tiny dim" style="line-height:1.6">No risks flagged.</p>`}
+            : `<p class="tiny dim" style="line-height:1.6">${_t("No risks flagged.")}</p>`}
           <div class="spacer"></div>
           <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="new-risk">${ic("plus", 12, 2.6)}Add Risk</button>
         </div>
@@ -2602,14 +2689,14 @@ VIEWS.overview = function () {
         <div class="card" style="padding:16px">
           <div class="row" style="gap:8px;margin-bottom:12px">
             <span class="tile-icon sm" style="background:var(--blue-weak);color:var(--blue)">${ic("zap", 15)}</span>
-            <h4 style="font-size:12.5px;font-weight:700">Recent Activity</h4>
+            <h4 style="font-size:12.5px;font-weight:700">${_t("Recent Activity")}</h4>
           </div>
           ${activity.length ? `<div class="stack-sm">${activity.map(a => `<div class="row-between" style="align-items:flex-start;gap:6px">
               <span class="mini truncate" style="color:var(--text-2);font-weight:500">${esc(a.text)}</span>
               <span class="mini dim" style="white-space:nowrap">${esc(relTime(a.at))}</span></div>`).join("")}</div>`
-            : `<p class="tiny dim" style="line-height:1.6">Your changes will show up here.</p>`}
+            : `<p class="tiny dim" style="line-height:1.6">${_t("Your changes will show up here.")}</p>`}
           <div class="spacer"></div>
-          <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="toggle-panel" data-panel="activity">View All Activity</button>
+          <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="toggle-panel" data-panel="activity">${_t("View All Activity")}</button>
         </div>
       </div>
     </div>
@@ -2617,31 +2704,31 @@ VIEWS.overview = function () {
     <!-- RIGHT COLUMN -->
     <div class="col-right">
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("clock", 18, 2.2)}</span><h3>Today</h3></div>
+        <div class="side-head"><span class="ic">${ic("clock", 18, 2.2)}</span><h3>${_t("Today")}</h3></div>
         ${due.length ? `<div class="stack-sm" style="margin-bottom:14px">${due.map(c => `
           <div class="row-between" style="gap:8px">
             <span class="row" style="gap:8px;min-width:0"><span class="dot-sm" style="background:var(--primary)"></span>
               <span class="truncate" style="font-size:12.5px;font-weight:600">${esc(c.name)}</span></span>
             <button class="btn btn-ghost btn-sm" data-action="start-timer" data-min="${Number(c.timebox) || 15}" data-label="${esc(c.name)}"
-              title="Start the timebox">${esc(fmtTimebox(c.timebox))}</button>
+              title="${_t("Start the timebox")}">${esc(fmtTimebox(c.timebox))}</button>
           </div>`).join("")}</div>`
-          : `<p class="tiny dim" style="margin-bottom:14px;line-height:1.6">No event scheduled for today.</p>`}
+          : `<p class="tiny dim" style="margin-bottom:14px;line-height:1.6">${_t("No event scheduled for today.")}</p>`}
         <div class="stat-row" style="padding-top:12px;border-top:1px solid var(--border)">
-          <span>Daily Scrum</span>
+          <span>${_t("Daily Scrum")}</span>
           <span class="v" style="color:${standup ? "var(--green)" : "var(--text-3)"}">${standup ? "recorded" : "not yet"}</span>
         </div>
         <div class="stat-row" style="margin-top:9px">
-          <span>Facilitator</span><span class="v">${esc(standup && standup.facilitator ? standup.facilitator : nextFacilitator() || "—")}</span>
+          <span>${_t("Facilitator")}</span><span class="v">${esc(standup && standup.facilitator ? standup.facilitator : nextFacilitator() || "—")}</span>
         </div>
         <div class="stat-row" style="margin-top:9px">
-          <span>Away today</span>
+          <span>${_t("Away today")}</span>
           <span class="v" style="color:${away.length ? "var(--amber)" : "var(--text-2)"}">${away.length ? esc(away.map(m => m.name.split(" ")[0]).join(", ")) : "nobody"}</span>
         </div>
         <button class="btn btn-soft btn-block" style="margin-top:16px" data-action="open-standup">${ic("users", 14)}${standup ? "Continue standup" : "Run the standup"}</button>
       </div>
 
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("pie", 18, 2.2)}</span><h3>Board flow</h3></div>
+        <div class="side-head"><span class="ic">${ic("pie", 18, 2.2)}</span><h3>${_t("Board flow")}</h3></div>
         ${st.total ? donut(segs, st.percent + "%", "Finished") : `<div style="padding:14px 0">${emptyState("pie", "Nothing to measure", "Add cards and this fills in automatically.", "", true)}</div>`}
         <div class="stack-sm" style="gap:11px">
           ${st.byColumn.map(c => {
@@ -2649,12 +2736,12 @@ VIEWS.overview = function () {
             return `<div class="stat-row">
               <span class="row" style="gap:8px"><span class="dot-sm" style="background:${{ blue: "var(--blue)", orange: "var(--orange)", purple: "var(--purple)", green: "var(--green)", red: "var(--red)", slate: "var(--slate)" }[c.col.accent || "slate"]}"></span>${esc(c.col.name)}</span>
               <span class="v" style="${over ? "color:var(--red)" : ""}" title="${over ? "Over the WIP limit of " + c.col.wip : ""}">${c.count}${c.col.wip ? "/" + c.col.wip : ""}</span></div>`;
-          }).join("") || `<p class="tiny dim" style="text-align:center">No columns yet.</p>`}
+          }).join("") || `<p class="tiny dim" style="text-align:center">${_t("No columns yet.")}</p>`}
         </div>
       </div>
 
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("chart", 18, 2.2)}</span><h3>Quick Stats</h3></div>
+        <div class="side-head"><span class="ic">${ic("chart", 18, 2.2)}</span><h3>${_t("Quick Stats")}</h3></div>
         <div class="stack-sm" style="gap:13px">
           ${quickStat("zap", "var(--green)", "Avg velocity", avgVelocity(5) || "—", "var(--green)")}
           ${quickStat("clock", "var(--blue)", "Cycle time (days)", cycleTimeStats().avgDays || "—", "var(--blue)")}
@@ -2667,7 +2754,7 @@ VIEWS.overview = function () {
       </div>
 
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("clipboard", 18, 2.2)}</span><h3>Definition of Done</h3></div>
+        <div class="side-head"><span class="ic">${ic("clipboard", 18, 2.2)}</span><h3>${_t("Definition of Done")}</h3></div>
         ${(() => {
           const dod = agreementOf("Definition of Done");
           const items = dod ? (dod.items || []) : [];
@@ -2721,16 +2808,16 @@ VIEWS.taskboard = function () {
   ${!tracksSprint(board)
     ? `<div class="notice" style="margin-bottom:18px">${ic("user", 16)}<span>
         <b>${esc(board.name)}</b> is a private board — its cards stay out of the burndown, the velocity and the cycle time.
-        <button class="link" data-action="edit-board">Change that</button>.</span></div>`
+        <button class="link" data-action="edit-board">${_t("Change that")}</button>.</span></div>`
     : sprint ? `<div class="notice info" style="margin-bottom:18px">${ic("refresh", 16)}<span>
         <b>${esc(sprint.name)}</b>${sprint.goal ? " — " + esc(sprint.goal) : ""} ·
         ${sp.done}/${sp.total} ${esc(sp.unit)} done, day ${sprintDayIndex(sprint)} of ${sprintDayList(sprint).length || "?"}.</span></div>`
       : `<div class="notice" style="margin-bottom:18px">${ic("info", 16)}<span>
         No Sprint is running, so nothing on this board counts towards a burndown.
-        <button class="link" data-action="go" data-view="sprints">Plan one</button>.</span></div>`}
+        <button class="link" data-action="go" data-view="sprints">${_t("Plan one")}</button>.</span></div>`}
 
   ${overWip.length ? `<div class="notice danger" style="margin-bottom:18px">${ic("alert", 16)}<span>
-    <b>Over the WIP limit:</b> ${overWip.map(c => esc(c.name) + " (" + board.tasks.filter(t => t.columnId === c.id).length + "/" + c.wip + ")").join(", ")}.
+    <b>${_t("Over the WIP limit:")}</b> ${overWip.map(c => esc(c.name) + " (" + board.tasks.filter(t => t.columnId === c.id).length + "/" + c.wip + ")").join(", ")}.
     Finishing beats starting.</span></div>` : ""}
 
   <div class="card">
@@ -2777,18 +2864,18 @@ function sprintStrip(sprint) {
             <span class="tiny dim">${esc(fmtDate(sprint.start) || "no start")} → ${esc(fmtDate(sprint.end) || "no end")}</span></div>
         </div>
         <div class="row" style="gap:6px">
-          <button class="btn btn-ghost btn-sm" data-action="copy-sprint-summary" data-id="${sprint.id}" title="Copy a plain-text summary">${ic("copy", 12)}Summary</button>
+          <button class="btn btn-ghost btn-sm" data-action="copy-sprint-summary" data-id="${sprint.id}" title="${_t("Copy a plain-text summary")}">${ic("copy", 12)}Summary</button>
           <button class="btn btn-ghost btn-sm" data-action="edit-sprint" data-id="${sprint.id}">${ic("edit", 12)}Edit</button>
         </div>
       </div>
       ${sprint.goal ? `<p class="goal">${esc(sprint.goal)}</p>`
-        : `<p class="goal dim" style="font-weight:500">No Sprint Goal yet — <button class="link" data-action="edit-sprint" data-id="${sprint.id}">add one</button>. A Sprint without a goal is just a to-do list.</p>`}
+        : `<p class="goal dim" style="font-weight:500">${_t("No Sprint Goal yet")} — <button class="link" data-action="edit-sprint" data-id="${sprint.id}">${_t("add one")}</button>. ${_t("A Sprint without a goal is just a to-do list.")}</p>`}
       <div class="sprint-meta">
-        <div class="m"><b>${days.length ? dayNo + "/" + days.length : "—"}</b><span>Day</span></div>
-        <div class="m"><b>${left === null ? "—" : left}</b><span>Days left</span></div>
+        <div class="m"><b>${days.length ? dayNo + "/" + days.length : "—"}</b><span>${_t("Day")}</span></div>
+        <div class="m"><b>${left === null ? "—" : left}</b><span>${_t("Days left")}</span></div>
         <div class="m"><b>${st.done}/${st.total}</b><span>${esc(st.unit)} done</span></div>
-        <div class="m"><b>${st.percent}%</b><span>Complete</span></div>
-        ${cap ? `<div class="m"><b>${cap}</b><span>Forecast</span></div>` : ""}
+        <div class="m"><b>${st.percent}%</b><span>${_t("Complete")}</span></div>
+        ${cap ? `<div class="m"><b>${cap}</b><span>${_t("Forecast")}</span></div>` : ""}
       </div>
       <div class="daypips">${pips}</div>
       <div class="row" style="gap:10px;margin-top:14px">
@@ -2798,7 +2885,7 @@ function sprintStrip(sprint) {
         ${ic("alert", 12, 2.4)} ${st.added} ${esc(st.unit)} were added after this Sprint started — worth raising at the Review.</p>` : ""}
     </div>
     <div>
-      <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Burndown</div>
+      <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${_t("Burndown")}</div>
       ${burndownSVG(sprint, true)}
     </div>
   </div>`;
@@ -2815,7 +2902,7 @@ function sprintRow(s) {
         <h4>${esc(s.name)}</h4>
         <div class="row" style="gap:6px">
           <span class="badge ${badge}">${esc((s.status || "planned")[0].toUpperCase() + (s.status || "planned").slice(1))}</span>
-          ${s.status === "closed" ? `<span class="badge b-neutral" title="Delivered">${v} delivered</span>` : ""}
+          ${s.status === "closed" ? `<span class="badge b-neutral" title="${_t("Delivered")}">${v} delivered</span>` : ""}
         </div>
       </div>
       ${s.goal ? `<p>${esc(s.goal)}</p>` : ""}
@@ -2826,10 +2913,10 @@ function sprintRow(s) {
       </div>
     </div>
     <div class="act">
-      ${s.status === "planned" ? `<button data-action="start-sprint" data-id="${s.id}" title="Start this Sprint">${ic("zap", 14)}</button>` : ""}
-      ${s.status === "active" ? `<button data-action="close-sprint" data-id="${s.id}" title="Close this Sprint">${ic("checkCircle", 14)}</button>` : ""}
-      <button data-action="edit-sprint" data-id="${s.id}" title="Edit">${ic("edit", 14)}</button>
-      <button class="del" data-action="delete-sprint" data-id="${s.id}" title="Delete">${ic("trash", 14)}</button>
+      ${s.status === "planned" ? `<button data-action="start-sprint" data-id="${s.id}" title="${_t("Start this Sprint")}">${ic("zap", 14)}</button>` : ""}
+      ${s.status === "active" ? `<button data-action="close-sprint" data-id="${s.id}" title="${_t("Close this Sprint")}">${ic("checkCircle", 14)}</button>` : ""}
+      <button data-action="edit-sprint" data-id="${s.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+      <button class="del" data-action="delete-sprint" data-id="${s.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
     </div>
   </div>`;
 }
@@ -2857,7 +2944,7 @@ VIEWS.sprints = function () {
     <div class="card">
       <div class="card-head">
         <div class="card-title"><span class="tile-icon">${ic("chart", 18, 2.2)}</span>
-          <div><h3>Burndown</h3><span class="sub">${sprint ? "Recorded automatically each day you use the tool" : "No active Sprint"}</span></div></div>
+          <div><h3>${_t("Burndown")}</h3><span class="sub">${sprint ? "Recorded automatically each day you use the tool" : "No active Sprint"}</span></div></div>
         ${sprint ? `<button class="btn btn-ghost btn-sm" data-action="edit-burndown" data-id="${sprint.id}">${ic("edit", 12)}Correct a day</button>` : ""}
       </div>
       ${sprint ? burndownSVG(sprint, false)
@@ -2867,7 +2954,7 @@ VIEWS.sprints = function () {
     <div class="card">
       <div class="card-head">
         <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("zap", 18, 2.2)}</span>
-          <div><h3>Velocity</h3><span class="sub">${recent.length ? pluralise(recent.length, "closed Sprint") : "No closed Sprints yet"}</span></div></div>
+          <div><h3>${_t("Velocity")}</h3><span class="sub">${recent.length ? pluralise(recent.length, "closed Sprint") : "No closed Sprints yet"}</span></div></div>
       </div>
       ${recent.length ? velocitySVG(recent)
         : emptyState("zap", "No velocity yet", "Close your first Sprint and a bar appears here. Three Sprints in, the average starts to mean something.", "", true)}
@@ -2878,16 +2965,16 @@ VIEWS.sprints = function () {
   </div>
 
   <div class="grid-4" style="margin-top:20px">
-    <div class="stat-tile"><b>${avg || "—"}</b><span>Avg velocity</span><p>Mean of the last ${Math.min(5, closed.length) || 0} closed Sprints.</p></div>
-    <div class="stat-tile"><b>${ct.avgDays || "—"}</b><span>Cycle time (days)</span><p>${ct.sample ? "Across " + pluralise(ct.sample, "finished item") + "." : "Move cards across the board and this fills in."}</p></div>
-    <div class="stat-tile"><b>${ct.throughput}</b><span>Done / 14 days</span><p>Items finished in the last two weeks.</p></div>
-    <div class="stat-tile"><b>${cap.available || "—"}</b><span>Person-days</span><p>${cap.people ? cap.lost + " lost to absence this Sprint." : "Add your team to see capacity."}</p></div>
+    <div class="stat-tile"><b>${avg || "—"}</b><span>${_t("Avg velocity")}</span><p>Mean of the last ${Math.min(5, closed.length) || 0} closed Sprints.</p></div>
+    <div class="stat-tile"><b>${ct.avgDays || "—"}</b><span>${_t("Cycle time (days)")}</span><p>${ct.sample ? "Across " + pluralise(ct.sample, "finished item") + "." : "Move cards across the board and this fills in."}</p></div>
+    <div class="stat-tile"><b>${ct.throughput}</b><span>${_t("Done / 14 days")}</span><p>${_t("Items finished in the last two weeks.")}</p></div>
+    <div class="stat-tile"><b>${cap.available || "—"}</b><span>${_t("Person-days")}</span><p>${cap.people ? cap.lost + " lost to absence this Sprint." : "Add your team to see capacity."}</p></div>
   </div>
 
   <div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon">${ic("list", 18, 2.2)}</span>
-        <div><h3>All Sprints</h3><span class="sub">${esc(pluralise(all.length, "Sprint"))}</span></div></div>
+        <div><h3>${_t("All Sprints")}</h3><span class="sub">${esc(pluralise(all.length, "Sprint"))}</span></div></div>
       <button class="btn btn-ghost btn-sm" data-action="new-sprint">${ic("plus", 12)}New Sprint</button>
     </div>
     ${all.length ? `<div class="stack-sm">${all.map(sprintRow).join("")}</div>`
@@ -2899,9 +2986,11 @@ VIEWS.sprints = function () {
 
 /* --------------------------------------------------------------- PLAYBOOK */
 function refTable(rows, headers) {
+  // Read-only Scrum reference: rendered fresh every paint, never stored, so
+  // every cell is safe to translate.
   return `<div class="table-wrap"><table class="tbl">
-    <thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
-    <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${i === 0 ? "cell-strong" : "muted"}">${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody>
+    <thead><tr>${headers.map(h => `<th>${esc(_t(h))}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${i === 0 ? "cell-strong" : "muted"}">${esc(_t(c))}</td>`).join("")}</tr>`).join("")}</tbody>
   </table></div>`;
 }
 
@@ -2921,15 +3010,15 @@ VIEWS.playbook = function () {
     <div class="card">
       <div class="card-head" style="margin-bottom:12px">
         <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("clipboard", 17, 2.2)}</span>
-          <div><h3>${esc(a.title)}</h3><span class="sub">${esc(a.type || "Agreement")} · ${esc(pluralise((a.items || []).length, "criterion", "criteria"))}</span></div></div>
+          <div><h3>${esc(a.title)}</h3><span class="sub">${esc(_t(a.type || "Agreement"))} · ${esc(pluralise((a.items || []).length, "criterion", "criteria"))}</span></div></div>
         <div class="act">
-          <button data-action="edit-agreement" data-id="${a.id}" title="Edit">${ic("edit", 14)}</button>
-          <button class="del" data-action="delete-agreement" data-id="${a.id}" title="Delete">${ic("trash", 14)}</button>
+          <button data-action="edit-agreement" data-id="${a.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+          <button class="del" data-action="delete-agreement" data-id="${a.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div>
       </div>
       ${(a.items || []).length ? `<div class="checklist">${(a.items || []).map((i, n) => `
         <div><span class="n">${n + 1}</span><span>${esc(i.text)}</span></div>`).join("")}</div>`
-        : `<p class="tiny dim">Nothing agreed yet — edit this to add the criteria.</p>`}
+        : `<p class="tiny dim">${_t("Nothing agreed yet — edit this to add the criteria.")}</p>`}
     </div>`).join("")}</div>`
     : `<div class="card">${emptyState("clipboard", "No agreements",
       "The Definition of Done, the Definition of Ready and how you work together. These are seeded on a fresh workspace — add them back if you cleared them.",
@@ -2938,37 +3027,37 @@ VIEWS.playbook = function () {
   <div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon">${ic("sparkle", 18, 2.2)}</span>
-        <div><h3>Facilitation techniques</h3><span class="sub">Pick one deliberately instead of running the same format for the ninth time</span></div></div>
+        <div><h3>${_t("Facilitation techniques")}</h3><span class="sub">Pick one deliberately instead of running the same format for the ninth time</span></div></div>
     </div>
     ${Object.keys(groups).map(g => `
       <div style="margin-bottom:16px">
-        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${esc(g)}</div>
+        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${esc(_t(g))}</div>
         <div class="ref-grid">${groups[g].map(t => `
-          <div class="ref"><h5>${esc(t.name)}</h5><p>${esc(t.when)}</p></div>`).join("")}</div>
+          <div class="ref"><h5>${esc(_t(t.name))}</h5><p>${esc(_t(t.when))}</p></div>`).join("")}</div>
       </div>`).join("")}
   </div>
 
   <div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--purple-weak);color:var(--purple)">${ic("info", 18, 2.2)}</span>
-        <div><h3>Scrum quick reference</h3><span class="sub">The bits that are worth having exactly right when someone asks</span></div></div>
+        <div><h3>${_t("Scrum quick reference")}</h3><span class="sub">${_t("The bits that are worth having exactly right when someone asks")}</span></div></div>
     </div>
     <div class="stack">
       <div>
-        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">The three accountabilities</div>
+        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${_t("The three accountabilities")}</div>
         ${refTable(SCRUM_REF.accountabilities, ["Accountability", "What they are on the hook for"])}
       </div>
       <div>
-        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">The five events and their timeboxes</div>
+        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${_t("The five events and their timeboxes")}</div>
         ${refTable(SCRUM_REF.events, ["Event", "Timebox", "Purpose"])}
         <p class="mini dim" style="margin-top:8px">Timeboxes shown are the maximum for a one-month Sprint; shorter Sprints get proportionally shorter events.</p>
       </div>
       <div>
-        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">The three artifacts and their commitments</div>
+        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${_t("The three artifacts and their commitments")}</div>
         ${refTable(SCRUM_REF.artifacts, ["Artifact", "Commitment", "What it is"])}
       </div>
       <div>
-        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">The five values</div>
+        <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${_t("The five values")}</div>
         <div class="ref-grid">${SCRUM_REF.values.map(v => `
           <div class="ref"><span class="k">${esc(v[0])}</span><p style="margin-top:4px">${esc(v[1])}</p></div>`).join("")}</div>
       </div>
@@ -3007,10 +3096,10 @@ VIEWS.team = function () {
     <button class="btn btn-primary" data-action="new-member">${ic("plus", 14)}Add Member</button>`)}
 
   <div class="grid-4" style="margin-bottom:20px">
-    <div class="stat-tile"><b>${S.team.items.length}</b><span>Members</span><p>${S.settings.teamName ? esc(S.settings.teamName) : "Everyone in the Scrum Team."}</p></div>
-    <div class="stat-tile" style="${away.length ? "border-color:var(--amber)" : ""}"><b>${away.length}</b><span>Away today</span><p>${away.length ? esc(away.map(m => m.name).join(", ")) : "Everyone is in."}</p></div>
-    <div class="stat-tile"><b>${cap.available || "—"}</b><span>Person-days</span><p>${sprint ? cap.lost + " lost to absence across " + pluralise(cap.days, "working day") + "." : "No Sprint running."}</p></div>
-    <div class="stat-tile"><b>${latestAvg || "—"}</b><span>Mood (1–5)</span><p>${latest ? "Checked " + fmtDate(latest.date) + "." : "No health check taken yet."}</p></div>
+    <div class="stat-tile"><b>${S.team.items.length}</b><span>${_t("Members")}</span><p>${S.settings.teamName ? esc(S.settings.teamName) : "Everyone in the Scrum Team."}</p></div>
+    <div class="stat-tile" style="${away.length ? "border-color:var(--amber)" : ""}"><b>${away.length}</b><span>${_t("Away today")}</span><p>${away.length ? esc(away.map(m => m.name).join(", ")) : "Everyone is in."}</p></div>
+    <div class="stat-tile"><b>${cap.available || "—"}</b><span>${_t("Person-days")}</span><p>${sprint ? cap.lost + " lost to absence across " + pluralise(cap.days, "working day") + "." : "No Sprint running."}</p></div>
+    <div class="stat-tile"><b>${latestAvg || "—"}</b><span>${_t("Mood (1–5)")}</span><p>${latest ? "Checked " + fmtDate(latest.date) + "." : "No health check taken yet."}</p></div>
   </div>
 
   ${list.length ? `<div class="grid-3">${list.map(m => {
@@ -3027,13 +3116,13 @@ VIEWS.team = function () {
           </div>
         </div>
         <div class="act">
-          <button data-action="edit-member" data-id="${m.id}" title="Edit">${ic("edit", 14)}</button>
-          <button class="del" data-action="delete-member" data-id="${m.id}" title="Delete">${ic("trash", 14)}</button>
+          <button data-action="edit-member" data-id="${m.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+          <button class="del" data-action="delete-member" data-id="${m.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div>
       </div>
       ${isOut ? `<span class="badge b-pending">${ic("calendar", 11)}Away today</span>` : ""}
       <div>
-        <div class="row-between mini dim" style="margin-bottom:4px"><span>Availability</span><b style="color:var(--text-2)">${pct}%</b></div>
+        <div class="row-between mini dim" style="margin-bottom:4px"><span>${_t("Availability")}</span><b style="color:var(--text-2)">${pct}%</b></div>
         <div class="cap-bar"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
       </div>
       ${soon.length ? `<p class="mini dim">${ic("calendar", 11)} Next away ${esc(fmtShort(soon[0].from))}${soon[0].reason ? " · " + esc(soon[0].reason) : ""}</p>` : ""}
@@ -3048,11 +3137,11 @@ VIEWS.team = function () {
   <div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("smile", 18, 2.2)}</span>
-        <div><h3>Team health</h3><span class="sub">${checks.length ? esc(pluralise(checks.length, "check")) + " recorded" : "Nothing recorded yet"}</span></div></div>
+        <div><h3>${_t("Team health")}</h3><span class="sub">${checks.length ? esc(pluralise(checks.length, "check")) + " recorded" : "Nothing recorded yet"}</span></div></div>
       <button class="btn btn-ghost btn-sm" data-action="new-health">${ic("plus", 12)}New check</button>
     </div>
     ${checks.length ? `<div class="table-wrap"><table class="tbl">
-      <thead><tr><th>Date</th><th>Average</th><th>Context</th><th>Low scores</th><th style="text-align:right">Actions</th></tr></thead>
+      <thead><tr><th>${_t("Date")}</th><th>${_t("Average")}</th><th>${_t("Context")}</th><th>${_t("Low scores")}</th><th style="text-align:right">${_t("Actions")}</th></tr></thead>
       <tbody>${sortBy(checks, h => h.date || "", "desc").map(h => {
         const scores = h.scores || [];
         const avg = scores.length ? Math.round((scores.reduce((a, s) => a + (Number(s.score) || 0), 0) / scores.length) * 10) / 10 : 0;
@@ -3064,8 +3153,8 @@ VIEWS.team = function () {
           <td class="muted cell-w">${esc(h.note || "—")}</td>
           <td class="muted cell-w">${low.length ? low.map(s => esc(s.person) + (s.comment ? " — " + esc(s.comment) : "")).join("<br>") : '<span class="dim">none</span>'}</td>
           <td><div class="act">
-            <button data-action="edit-health" data-id="${h.id}" title="Edit">${ic("edit", 14)}</button>
-            <button class="del" data-action="delete-health" data-id="${h.id}" title="Delete">${ic("trash", 14)}</button>
+            <button data-action="edit-health" data-id="${h.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+            <button class="del" data-action="delete-health" data-id="${h.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
           </div></td></tr>`;
       }).join("")}</tbody></table></div>`
       : emptyState("smile", "No health checks yet",
@@ -3094,13 +3183,13 @@ function ceremonyCard(c) {
         <div class="row wrap" style="gap:6px;margin-top:6px">
           <span class="timebox">${ic("clock", 11, 2.6)}${esc(fmtTimebox(c.timebox))}</span>
           <span class="tag">${esc(cadenceLabel(c.cadence))}</span>
-          ${due ? '<span class="badge b-active">Today</span>' : ""}
+          ${due ? '<span class="badge b-active">' + esc(_t("Today")) + '</span>' : ""}
           ${c.nextAt && !due ? `<span class="tag">next ${esc(fmtShort(c.nextAt))}</span>` : ""}
         </div>
       </div>
       <div class="act">
-        <button data-action="edit-ceremony" data-id="${c.id}" title="Edit">${ic("edit", 14)}</button>
-        <button class="del" data-action="delete-ceremony" data-id="${c.id}" title="Delete">${ic("trash", 14)}</button>
+        <button data-action="edit-ceremony" data-id="${c.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+        <button class="del" data-action="delete-ceremony" data-id="${c.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
       </div>
     </div>
     ${c.purpose ? `<p class="tiny muted" style="line-height:1.6">${esc(c.purpose)}</p>` : ""}
@@ -3109,14 +3198,14 @@ function ceremonyCard(c) {
       <label class="${a.done ? "done" : ""}">
         <input type="checkbox" data-action="toggle-agenda" data-id="${c.id}" data-index="${i}" ${a.done ? "checked" : ""}>
         <span>${esc(a.text)}</span>
-      </label>`).join("")}</div>` : `<p class="mini dim">No agenda yet — edit this event to add one.</p>`}
+      </label>`).join("")}</div>` : `<p class="mini dim">${_t("No agenda yet — edit this event to add one.")}</p>`}
     <div class="spacer"></div>
     <div class="row" style="gap:6px;margin-top:4px">
       <button class="btn btn-soft btn-sm grow" data-action="start-timer" data-min="${Number(c.timebox) || 15}" data-label="${esc(c.name)}">
         ${ic("clock", 12)}Start timebox</button>
       ${c.name.toLowerCase().indexOf("daily") >= 0 || c.name.toLowerCase().indexOf("standup") >= 0
         ? `<button class="btn btn-primary btn-sm" data-action="open-standup">${ic("users", 12)}Run standup</button>` : ""}
-      ${covered ? `<button class="btn btn-ghost btn-sm" data-action="reset-agenda" data-id="${c.id}" title="Untick every agenda point">${ic("refresh", 12)}${covered}/${agenda.length}</button>` : ""}
+      ${covered ? `<button class="btn btn-ghost btn-sm" data-action="reset-agenda" data-id="${c.id}" title="${_t("Untick every agenda point")}">${ic("refresh", 12)}${covered}/${agenda.length}</button>` : ""}
     </div>
   </div>`;
 }
@@ -3137,7 +3226,7 @@ VIEWS.ceremonies = function () {
     <button class="btn btn-primary" data-action="open-standup">${ic("users", 14)}${standupToday ? "Continue standup" : "Run today's standup"}</button>`)}
 
   ${due.length ? `<div class="notice info" style="margin-bottom:18px">${ic("clock", 16)}<span>
-    <b>Today:</b> ${due.map(c => esc(c.name) + " (" + esc(fmtTimebox(c.timebox)) + ")").join(" · ")}</span></div>` : ""}
+    <b>${_t("Today:")}</b> ${due.map(c => esc(c.name) + " (" + esc(fmtTimebox(c.timebox)) + ")").join(" · ")}</span></div>` : ""}
 
   ${list.length ? `<div class="grid-3">${list.map(ceremonyCard).join("")}</div>`
     : `<div class="card">${emptyState("clock", "No events defined",
@@ -3151,7 +3240,7 @@ VIEWS.ceremonies = function () {
   <div class="card">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--blue-weak);color:var(--blue)">${ic("users", 18, 2.2)}</span>
-        <div><h3>Daily Scrum log</h3><span class="sub">${standupToday ? "Today is recorded" : "Nothing recorded today"} · next facilitator: ${esc(nextFacilitator() || "—")}</span></div></div>
+        <div><h3>${_t("Daily Scrum log")}</h3><span class="sub">${standupToday ? "Today is recorded" : "Nothing recorded today"} · next facilitator: ${esc(nextFacilitator() || "—")}</span></div></div>
       <button class="btn btn-primary btn-sm" data-action="open-standup">${ic(standupToday ? "edit" : "plus", 12)}${standupToday ? "Edit today" : "Record today"}</button>
     </div>
     ${recent.length ? `<div class="stack-sm">${recent.map(s => {
@@ -3163,7 +3252,7 @@ VIEWS.ceremonies = function () {
           <div class="row-between" style="align-items:flex-start">
             <h4>${esc(fmtDate(s.date))}${s.date === today ? " · today" : ""}</h4>
             <div class="row" style="gap:6px">
-              ${blockers.length ? `<span class="badge b-high">${pluralise(blockers.length, "blocker")}</span>` : `<span class="badge b-done">No blockers</span>`}
+              ${blockers.length ? `<span class="badge b-high">${pluralise(blockers.length, "blocker")}</span>` : `<span class="badge b-done">${_t("No blockers")}</span>`}
               ${s.facilitator ? `<span class="tag">${esc(s.facilitator)}</span>` : ""}
             </div>
           </div>
@@ -3175,8 +3264,8 @@ VIEWS.ceremonies = function () {
             </div>`).join("")}</div>` : ""}
         </div>
         <div class="act">
-          <button data-action="open-standup" data-date="${esc(s.date)}" title="Open">${ic("edit", 14)}</button>
-          <button class="del" data-action="delete-standup" data-id="${s.id}" title="Delete">${ic("trash", 14)}</button>
+          <button data-action="open-standup" data-date="${esc(s.date)}" title="${_t("Open")}">${ic("edit", 14)}</button>
+          <button class="del" data-action="delete-standup" data-id="${s.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div>
       </div>`;
     }).join("")}</div>`
@@ -3219,9 +3308,9 @@ function impedimentRow(i) {
       </div>
     </div>
     <div class="act">
-      ${resolved ? "" : `<button data-action="resolve-impediment" data-id="${i.id}" title="Mark resolved">${ic("checkCircle", 14)}</button>`}
-      <button data-action="edit-impediment" data-id="${i.id}" title="Edit">${ic("edit", 14)}</button>
-      <button class="del" data-action="delete-impediment" data-id="${i.id}" title="Delete">${ic("trash", 14)}</button>
+      ${resolved ? "" : `<button data-action="resolve-impediment" data-id="${i.id}" title="${_t("Mark resolved")}">${ic("checkCircle", 14)}</button>`}
+      <button data-action="edit-impediment" data-id="${i.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+      <button class="del" data-action="delete-impediment" data-id="${i.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
     </div>
   </div>`;
 }
@@ -3251,16 +3340,16 @@ VIEWS.impediments = function () {
     <button class="btn btn-primary" data-action="new-impediment">${ic("plus", 14)}Raise Impediment</button>`)}
 
   <div class="grid-4" style="margin-bottom:20px">
-    <div class="stat-tile"><b>${counts.open + counts["in-progress"] + counts.escalated}</b><span>Still in the way</span><p>Across every status that is not resolved.</p></div>
-    <div class="stat-tile" style="${aged.length ? "border-color:var(--red)" : ""}"><b style="${aged.length ? "color:var(--red)" : ""}">${aged.length}</b><span>Aging</span><p>Open ${S.settings.impedimentAgeAlertDays || 3}+ days. These need escalating.</p></div>
-    <div class="stat-tile"><b>${counts.escalated}</b><span>Escalated</span><p>Handed to someone outside the team.</p></div>
-    <div class="stat-tile"><b>${avgClear || "—"}</b><span>Avg days to clear</span><p>${cleared.length ? "Across " + pluralise(cleared.length, "resolved impediment") + "." : "Nothing resolved yet."}</p></div>
+    <div class="stat-tile"><b>${counts.open + counts["in-progress"] + counts.escalated}</b><span>${_t("Still in the way")}</span><p>${_t("Across every status that is not resolved.")}</p></div>
+    <div class="stat-tile" style="${aged.length ? "border-color:var(--red)" : ""}"><b style="${aged.length ? "color:var(--red)" : ""}">${aged.length}</b><span>${_t("Aging")}</span><p>Open ${S.settings.impedimentAgeAlertDays || 3}+ days. These need escalating.</p></div>
+    <div class="stat-tile"><b>${counts.escalated}</b><span>${_t("Escalated")}</span><p>${_t("Handed to someone outside the team.")}</p></div>
+    <div class="stat-tile"><b>${avgClear || "—"}</b><span>${_t("Avg days to clear")}</span><p>${cleared.length ? "Across " + pluralise(cleared.length, "resolved impediment") + "." : "Nothing resolved yet."}</p></div>
   </div>
 
   <div class="card">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--red-weak);color:var(--red)">${ic("alert", 18, 2.2)}</span>
-        <div><h3>In the way now</h3><span class="sub">${open.length ? esc(pluralise(open.length, "impediment")) : "Nothing blocking — enjoy it"}</span></div></div>
+        <div><h3>${_t("In the way now")}</h3><span class="sub">${open.length ? esc(pluralise(open.length, "impediment")) : "Nothing blocking — enjoy it"}</span></div></div>
     </div>
     ${open.length ? `<div class="stack-sm">${open.map(impedimentRow).join("")}</div>`
       : S.impediments.items.length
@@ -3273,7 +3362,7 @@ VIEWS.impediments = function () {
   ${resolved.length ? `<div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("checkCircle", 18, 2.2)}</span>
-        <div><h3>Cleared</h3><span class="sub">${esc(pluralise(resolved.length, "impediment"))} · kept because the same wall comes back</span></div></div>
+        <div><h3>${_t("Cleared")}</h3><span class="sub">${esc(pluralise(resolved.length, "impediment"))} · kept because the same wall comes back</span></div></div>
     </div>
     <div class="stack-sm">${resolved.slice(0, 25).map(impedimentRow).join("")}</div>
   </div>` : ""}`;
@@ -3283,7 +3372,7 @@ VIEWS.impediments = function () {
 function decisionTable(list, compact) {
   return `<div class="table-wrap"><table class="tbl">
     <thead><tr>
-      <th>Problem statement</th><th>Decision</th><th>Approved by</th><th>Status</th><th>Impact</th><th>Date</th><th style="text-align:right">Actions</th>
+      <th>${_t("Problem statement")}</th><th>${_t("Decision")}</th><th>${_t("Approved by")}</th><th>${_t("Status")}</th><th>${_t("Impact")}</th><th>${_t("Date")}</th><th style="text-align:right">${_t("Actions")}</th>
     </tr></thead>
     <tbody>${list.map(d => `<tr data-action="open-decision" data-id="${d.id}" style="cursor:pointer">
       <td class="cell-strong cell-w">${esc(d.problem)}
@@ -3296,8 +3385,8 @@ function decisionTable(list, compact) {
       <td>${impactBadge(d.impact)}</td>
       <td class="muted" style="white-space:nowrap">${esc(fmtDate(d.date))}</td>
       <td><div class="act">
-        <button data-action="edit-decision" data-id="${d.id}" title="Edit">${ic("edit", 14)}</button>
-        <button class="del" data-action="delete-decision" data-id="${d.id}" title="Delete">${ic("trash", 14)}</button>
+        <button data-action="edit-decision" data-id="${d.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+        <button class="del" data-action="delete-decision" data-id="${d.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
       </div></td>
     </tr>`).join("")}</tbody></table></div>`;
 }
@@ -3360,7 +3449,7 @@ VIEWS.roadmap = function () {
               <h4>${esc(m.title)}</h4>
               <div class="row" style="gap:6px">
                 <span class="badge b-${esc(m.status || "planned")}">${esc((m.status || "planned")[0].toUpperCase() + (m.status || "planned").slice(1))}</span>
-                ${late ? '<span class="badge b-overdue">Overdue</span>' : ""}
+                ${late ? '<span class="badge b-overdue">' + esc(_t("Overdue")) + '</span>' : ""}
               </div>
             </div>
             ${m.notes ? `<p>${esc(m.notes)}</p>` : ""}
@@ -3371,8 +3460,8 @@ VIEWS.roadmap = function () {
             </div>
           </div>
           <div class="act">
-            <button data-action="edit-milestone" data-id="${m.id}" title="Edit">${ic("edit", 14)}</button>
-            <button class="del" data-action="delete-milestone" data-id="${m.id}" title="Delete">${ic("trash", 14)}</button>
+            <button data-action="edit-milestone" data-id="${m.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+            <button class="del" data-action="delete-milestone" data-id="${m.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
           </div>
         </div>`;
       }).join("")}</div>
@@ -3399,34 +3488,34 @@ VIEWS.refinement = function () {
     <button class="btn btn-primary" data-action="new-refinement">${ic("plus", 14)}New Item</button>`)}
 
   <div class="grid-4" style="margin-bottom:20px">
-    <div class="stat-tile"><b>${S.refinement.items.length}</b><span>In the queue</span><p>Not yet pulled into a Sprint.</p></div>
-    <div class="stat-tile"><b>${ready}</b><span>Ready</span><p>${criteria.length ? "Meet all " + criteria.length + " Definition-of-Ready criteria." : "Write a Definition of Ready in the Playbook."}</p></div>
-    <div class="stat-tile"><b>${points || "—"}</b><span>Points queued</span><p>${avg ? "Roughly " + pluralise(Math.ceil(points / avg), "Sprint") + " at the current average." : "Estimate items to forecast."}</p></div>
-    <div class="stat-tile"><b>${sprint ? "Yes" : "No"}</b><span>Sprint to pull into</span><p>${sprint ? esc(sprint.name) + " is running." : "Start a Sprint before pulling items in."}</p></div>
+    <div class="stat-tile"><b>${S.refinement.items.length}</b><span>${_t("In the queue")}</span><p>${_t("Not yet pulled into a Sprint.")}</p></div>
+    <div class="stat-tile"><b>${ready}</b><span>${_t("Ready")}</span><p>${criteria.length ? "Meet all " + criteria.length + " Definition-of-Ready criteria." : "Write a Definition of Ready in the Playbook."}</p></div>
+    <div class="stat-tile"><b>${points || "—"}</b><span>${_t("Points queued")}</span><p>${avg ? "Roughly " + pluralise(Math.ceil(points / avg), "Sprint") + " at the current average." : "Estimate items to forecast."}</p></div>
+    <div class="stat-tile"><b>${sprint ? "Yes" : "No"}</b><span>${_t("Sprint to pull into")}</span><p>${sprint ? esc(sprint.name) + " is running." : "Start a Sprint before pulling items in."}</p></div>
   </div>
 
   <div class="card">
     ${list.length ? `<div class="stack-sm" id="refinementList">${list.map(b => {
       const dor = dorScore(b);
       return `<div class="item" draggable="true" data-backlog-id="${b.id}">
-        <span class="grip" title="Drag to reorder">${ic("grip", 15, 2.6)}</span>
+        <span class="grip" title="${_t("Drag to reorder")}">${ic("grip", 15, 2.6)}</span>
         <div class="grow">
           <div class="row-between" style="align-items:flex-start">
             <h4>${esc(b.title)}</h4>
             <div class="row" style="gap:6px">
-              ${b.value ? `<span class="badge b-low" title="Business value">Value ${b.value}</span>` : ""}
-              ${b.points ? `<span class="badge b-neutral" title="Story points">${b.points} pts</span>` : `<span class="badge b-pending" title="Not estimated">Not sized</span>`}
+              ${b.value ? `<span class="badge b-low" title="${_t("Business value")}">Value ${b.value}</span>` : ""}
+              ${b.points ? `<span class="badge b-neutral" title="${_t("Story points")}">${b.points} pts</span>` : `<span class="badge b-pending" title="${_t("Not estimated")}">${_t("Not sized")}</span>`}
               ${criteria.length ? (dor.ready
                 ? `<span class="badge b-approved">${ic("check", 11, 3)}Ready</span>`
-                : `<span class="badge b-pending" title="Definition of Ready">${dor.met}/${dor.total} ready</span>`) : ""}
+                : `<span class="badge b-pending" title="${_t("Definition of Ready")}">${dor.met}/${dor.total} ready</span>`) : ""}
             </div>
           </div>
           ${b.description ? `<p>${esc(b.description)}</p>` : ""}
         </div>
         <div class="act">
           <button data-action="pull-into-sprint" data-id="${b.id}" title="${sprint ? "Pull into " + esc(sprint.name) : "Put on the board"}">${ic("upload", 14)}</button>
-          <button data-action="edit-refinement" data-id="${b.id}" title="Edit">${ic("edit", 14)}</button>
-          <button class="del" data-action="delete-refinement" data-id="${b.id}" title="Delete">${ic("trash", 14)}</button>
+          <button data-action="edit-refinement" data-id="${b.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+          <button class="del" data-action="delete-refinement" data-id="${b.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div>
       </div>`;
     }).join("")}</div>`
@@ -3456,8 +3545,8 @@ VIEWS.notes = function () {
           ${ic("bell", 11, 2.4)}${due ? (d === 0 ? "Today" : Math.abs(d) + "d overdue") : esc(fmtShort(n.remindAt))}</span>`
           : `<span class="mini dim">${esc(relTime(n.createdAt))}</span>`}
         <div class="act">
-          <button data-action="edit-note" data-id="${n.id}" title="Edit">${ic("edit", 13)}</button>
-          <button class="del" data-action="delete-note" data-id="${n.id}" title="Delete">${ic("trash", 13)}</button>
+          <button data-action="edit-note" data-id="${n.id}" title="${_t("Edit")}">${ic("edit", 13)}</button>
+          <button class="del" data-action="delete-note" data-id="${n.id}" title="${_t("Delete")}">${ic("trash", 13)}</button>
         </div>
       </div>
     </div>`;
@@ -3479,7 +3568,7 @@ VIEWS.documents = function () {
     <button class="btn btn-primary" data-action="new-document">${ic("plus", 14)}Add Document</button>`)}
   <div class="card">
     ${list.length ? `<div class="table-wrap"><table class="tbl">
-      <thead><tr><th>Document</th><th>Type</th><th>Owner</th><th>Location</th><th>Updated</th><th style="text-align:right">Actions</th></tr></thead>
+      <thead><tr><th>${_t("Document")}</th><th>${_t("Type")}</th><th>${_t("Owner")}</th><th>${_t("Location")}</th><th>${_t("Updated")}</th><th style="text-align:right">${_t("Actions")}</th></tr></thead>
       <tbody>${list.map(d => `<tr>
         <td class="cell-strong cell-w">${esc(d.title)}${d.note ? `<div class="mini dim" style="margin-top:4px;font-weight:400">${esc(d.note)}</div>` : ""}</td>
         <td><span class="badge b-neutral">${esc(d.type || "Other")}</span></td>
@@ -3487,9 +3576,9 @@ VIEWS.documents = function () {
         <td class="muted cell-w"><span class="truncate" style="display:block;max-width:260px">${esc(d.url || "—")}</span></td>
         <td class="muted" style="white-space:nowrap">${esc(fmtDate(d.updatedAt || d.createdAt))}</td>
         <td><div class="act">
-          ${d.url ? `<button data-action="open-document" data-id="${d.id}" title="Open">${ic("external", 14)}</button>` : ""}
-          <button data-action="edit-document" data-id="${d.id}" title="Edit">${ic("edit", 14)}</button>
-          <button class="del" data-action="delete-document" data-id="${d.id}" title="Delete">${ic("trash", 14)}</button>
+          ${d.url ? `<button data-action="open-document" data-id="${d.id}" title="${_t("Open")}">${ic("external", 14)}</button>` : ""}
+          <button data-action="edit-document" data-id="${d.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+          <button class="del" data-action="delete-document" data-id="${d.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div></td></tr>`).join("")}</tbody></table></div>`
       : emptyState("doc", "No documents registered",
         "Link the PRD, the designs, the analytics dashboard — anything you keep hunting for. Links only; nothing is uploaded.",
@@ -3511,10 +3600,10 @@ VIEWS.retrospective = function () {
     <button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}New Session</button>`)}
 
   ${list.length ? `<div class="grid-4" style="margin-bottom:20px">
-    <div class="stat-tile"><b>${list.length}</b><span>Sessions</span><p>Held and recorded.</p></div>
-    <div class="stat-tile" style="${open.length ? "border-color:var(--amber)" : ""}"><b>${open.length}</b><span>Actions open</span><p>${open.length ? "Chase these before the next session." : "Nothing outstanding."}</p></div>
-    <div class="stat-tile"><b>${(() => { const all = list.reduce((a, r) => a + (r.actions || []).length, 0); const d = list.reduce((a, r) => a + (r.actions || []).filter(x => x.done).length, 0); return all ? Math.round(d / all * 100) + "%" : "—"; })()}</b><span>Actions completed</span><p>Across every retro on record.</p></div>
-    <div class="stat-tile"><b style="font-size:13px;line-height:1.4">${esc(lastFormat || "—")}</b><span>Last format</span><p>Vary it — the Playbook has ${TECHNIQUES.filter(t => t.group === "Retrospective formats").length} to pick from.</p></div>
+    <div class="stat-tile"><b>${list.length}</b><span>${_t("Sessions")}</span><p>${_t("Held and recorded.")}</p></div>
+    <div class="stat-tile" style="${open.length ? "border-color:var(--amber)" : ""}"><b>${open.length}</b><span>${_t("Actions open")}</span><p>${open.length ? "Chase these before the next session." : "Nothing outstanding."}</p></div>
+    <div class="stat-tile"><b>${(() => { const all = list.reduce((a, r) => a + (r.actions || []).length, 0); const d = list.reduce((a, r) => a + (r.actions || []).filter(x => x.done).length, 0); return all ? Math.round(d / all * 100) + "%" : "—"; })()}</b><span>${_t("Actions completed")}</span><p>${_t("Across every retro on record.")}</p></div>
+    <div class="stat-tile"><b style="font-size:13px;line-height:1.4">${esc(lastFormat || "—")}</b><span>${_t("Last format")}</span><p>${_tp("Vary it — the Playbook has {n} to pick from.", { n: TECHNIQUES.filter(t => t.group === "Retrospective formats").length })}</p></div>
   </div>` : ""}
 
   ${list.length ? list.map(r => {
@@ -3526,20 +3615,20 @@ VIEWS.retrospective = function () {
         <div class="card-title"><span class="tile-icon" style="background:var(--blue-weak);color:var(--blue)">${ic("history", 17, 2.2)}</span>
           <div><h3>${esc(r.title)}</h3><span class="sub">${esc(fmtDate(r.date))}${sprint ? " · " + esc(sprint.name) : ""}${r.format ? " · " + esc(r.format) : ""}${actions.length ? " · " + doneCount + "/" + actions.length + " actions done" : ""}</span></div></div>
         <div class="act">
-          <button data-action="edit-retro" data-id="${r.id}" title="Edit">${ic("edit", 14)}</button>
-          <button class="del" data-action="delete-retro" data-id="${r.id}" title="Delete">${ic("trash", 14)}</button>
+          <button data-action="edit-retro" data-id="${r.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
+          <button class="del" data-action="delete-retro" data-id="${r.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div>
       </div>
       <div class="grid-3">
         <div class="retro-col">
           <h5 style="color:var(--green)">${ic("smile", 14)}Went well</h5>
           ${(r.well || []).length ? (r.well || []).map(x => `<div class="retro-line"><span class="grow">${esc(x.text || x)}</span></div>`).join("")
-            : '<p class="mini dim">Nothing recorded.</p>'}
+            : '<p class="mini dim">' + esc(_t("Nothing recorded.")) + '</p>'}
         </div>
         <div class="retro-col">
           <h5 style="color:var(--red)">${ic("frown", 14)}Went wrong</h5>
           ${(r.wrong || []).length ? (r.wrong || []).map(x => `<div class="retro-line"><span class="grow">${esc(x.text || x)}</span></div>`).join("")
-            : '<p class="mini dim">Nothing recorded.</p>'}
+            : '<p class="mini dim">' + esc(_t("Nothing recorded.")) + '</p>'}
         </div>
         <div class="retro-col">
           <h5 style="color:var(--primary-text)">${ic("bolt", 14)}Action items</h5>
@@ -3547,9 +3636,9 @@ VIEWS.retrospective = function () {
               <input type="checkbox" data-action="toggle-retro-action" data-id="${r.id}" data-index="${i}" ${a.done ? "checked" : ""}
                 style="width:14px;height:14px;accent-color:var(--primary);margin-top:2px">
               <span class="grow" style="${a.done ? "text-decoration:line-through;color:var(--text-3)" : ""}">${esc(a.text)}${a.owner ? `<span class="mini dim"> · ${esc(a.owner)}</span>` : ""}</span>
-              <button data-action="promote-retro-action" data-id="${r.id}" data-index="${i}" title="Create a task from this">${ic("upload", 13)}</button>
+              <button data-action="promote-retro-action" data-id="${r.id}" data-index="${i}" title="${_t("Create a task from this")}">${ic("upload", 13)}</button>
             </div>`).join("")
-            : '<p class="mini dim">Nothing recorded.</p>'}
+            : '<p class="mini dim">' + esc(_t("Nothing recorded.")) + '</p>'}
         </div>
       </div>
     </div>`;
@@ -3571,47 +3660,47 @@ VIEWS.settings = function () {
     <div class="stack">
 
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("user", 18, 2.2)}</span><h3>Profile</h3></div>
+        <div class="side-head"><span class="ic">${ic("user", 18, 2.2)}</span><h3>${_t("Profile")}</h3></div>
         <div class="row" style="gap:14px;margin-bottom:18px">
           ${avatar(p.name, "lg")}
           <div><div style="font-weight:700;font-size:14px">${esc(p.name)}</div>
             <div class="tiny muted">${esc(p.role || "")}</div></div>
         </div>
         <div class="form-grid">
-          <div class="field full"><label for="setName">Your name</label>
-            <input class="inp" id="setName" data-setting="profile.name" value="${esc(p.name)}" placeholder="Your name"></div>
-          <div class="field full"><label for="setRole">Your role</label>
+          <div class="field full"><label for="setName">${_t("Your name")}</label>
+            <input class="inp" id="setName" data-setting="profile.name" value="${esc(p.name)}" placeholder="${_t("Your name")}"></div>
+          <div class="field full"><label for="setRole">${_t("Your role")}</label>
             <input class="inp" id="setRole" data-setting="profile.role" value="${esc(p.role || "")}" placeholder="e.g. Scrum Master"></div>
-          <div class="field full"><label for="setTeam">Team name</label>
+          <div class="field full"><label for="setTeam">${_t("Team name")}</label>
             <input class="inp" id="setTeam" data-setting="teamName" value="${esc(S.settings.teamName || "")}" placeholder="e.g. Team Honeycomb">
-            <span class="hint">Shown under the greeting in the header.</span></div>
-          <div class="field full"><label for="setWs">Workspace name</label>
+            <span class="hint">${_t("Shown under the greeting in the header.")}</span></div>
+          <div class="field full"><label for="setWs">${_t("Workspace name")}</label>
             <input class="inp" id="setWs" data-setting="workspaceName" value="${esc(S.settings.workspaceName || "")}" placeholder="e.g. Platform 2026"></div>
         </div>
       </div>
 
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("gear", 18, 2.2)}</span><h3>How this team works</h3></div>
+        <div class="side-head"><span class="ic">${ic("gear", 18, 2.2)}</span><h3>${_t("How this team works")}</h3></div>
         <div class="form-grid">
-          <div class="field"><label for="setLen">Sprint length (days)</label>
+          <div class="field"><label for="setLen">${_t("Sprint length (days)")}</label>
             <input class="inp" type="number" min="1" max="60" id="setLen" data-setting="sprintLengthDays" value="${esc(String(S.settings.sprintLengthDays || 14))}">
-            <span class="hint">Used to pre-fill the dates on a new Sprint.</span></div>
-          <div class="field"><label for="setImp">Impediment alert after (days)</label>
+            <span class="hint">${_t("Used to pre-fill the dates on a new Sprint.")}</span></div>
+          <div class="field"><label for="setImp">${_t("Impediment alert after (days)")}</label>
             <input class="inp" type="number" min="1" max="60" id="setImp" data-setting="impedimentAgeAlertDays" value="${esc(String(S.settings.impedimentAgeAlertDays || 3))}">
-            <span class="hint">Older open impediments turn red and enter your alerts.</span></div>
-          <div class="field"><label for="setStale">Stale card after (days)</label>
+            <span class="hint">${_t("Older open impediments turn red and enter your alerts.")}</span></div>
+          <div class="field"><label for="setStale">${_t("Stale card after (days)")}</label>
             <input class="inp" type="number" min="0" max="60" id="setStale" data-setting="staleCardDays" value="${esc(String(S.settings.staleCardDays === 0 ? 0 : S.settings.staleCardDays || 3))}">
             <span class="hint">A card untouched this long gets a clock on the board. Set 0 to switch it off.</span></div>
-          <div class="field"><label>Keyboard shortcuts</label>
-            <button class="btn btn-ghost btn-block" data-action="show-shortcuts">${ic("zap", 13)}Show the list</button>
-            <span class="hint">Or press <kbd>?</kbd> anywhere.</span></div>
+          <div class="field"><label>${_t("Keyboard shortcuts")}</label>
+            <button class="btn btn-ghost btn-block" data-action="show-shortcuts">${ic("zap", 13)}${_t("Show the list")}</button>
+            <span class="hint">${_t("Or press <kbd>?</kbd> anywhere.")}</span></div>
         </div>
       </div>
 
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("sun", 18, 2.2)}</span><h3>Appearance</h3></div>
+        <div class="side-head"><span class="ic">${ic("sun", 18, 2.2)}</span><h3>${_t("Appearance")}</h3></div>
         <div class="set-row">
-          <div><div class="lbl">Theme</div>
+          <div><div class="lbl">${_t("Theme")}</div>
             <div class="desc">“System” follows your Windows light/dark setting. Your choice is saved with the workspace.</div></div>
           <div class="seg">
             <button data-action="set-theme" data-theme="light" class="${theme === "light" ? "on" : ""}">${ic("sun", 13)} Light</button>
@@ -3624,23 +3713,23 @@ VIEWS.settings = function () {
 
     <div class="stack">
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("db", 18, 2.2)}</span><h3>Storage</h3></div>
+        <div class="side-head"><span class="ic">${ic("db", 18, 2.2)}</span><h3>${_t("Storage")}</h3></div>
         <div class="set-row">
           <div><div class="lbl row" style="gap:8px">${ic(folder ? "folder" : "browser", 15)} ${esc(Store.location())}</div>
             <div class="desc">${folder
               ? "Each section is a separate JSON file in that folder. A change saves that one file — the rest are left alone."
               : "Saved in this browser's local storage. Clearing site data for this page deletes the workspace, so keep a backup copy."}</div></div>
-          <div id="saveState" class="row tiny bold" style="gap:5px;color:var(--green)">${ic("checkCircle", 13)}<span>Saved</span></div>
+          <div id="saveState" class="row tiny bold" style="gap:5px;color:var(--green)">${ic("checkCircle", 13)}<span>${_t("Saved")}</span></div>
         </div>
         <div class="set-row">
-          <div><div class="lbl">Switch storage location</div>
+          <div><div class="lbl">${_t("Switch storage location")}</div>
             <div class="desc">Everything you have now is copied to the new location. ${folder ? "" : "Folder storage needs Chrome or Edge."}</div></div>
           ${folder
             ? `<button class="btn btn-ghost" data-action="switch-to-local">${ic("browser", 14)}Use this browser</button>`
             : `<button class="btn btn-ghost" data-action="switch-to-folder" ${Store.folderSupported() ? "" : "disabled"}>${ic("folder", 14)}Choose a folder</button>`}
         </div>
         <div class="set-row">
-          <div><div class="lbl">Backup copy</div>
+          <div><div class="lbl">${_t("Backup copy")}</div>
             <div class="desc">Download the whole workspace as one JSON file, or restore one you saved earlier. Importing merges by id and never deletes what it does not recognise.</div></div>
           <div class="row">
             <button class="btn btn-ghost" data-action="export-all">${ic("download", 14)}Export</button>
@@ -3650,7 +3739,7 @@ VIEWS.settings = function () {
       </div>
 
       <div class="card">
-        <div class="side-head"><span class="ic">${ic("chart", 18, 2.2)}</span><h3>What is in this workspace</h3></div>
+        <div class="side-head"><span class="ic">${ic("chart", 18, 2.2)}</span><h3>${_t("What is in this workspace")}</h3></div>
         <div class="stack-sm" style="gap:11px">
           ${[["sprints", "Sprints", "refresh"], ["boards", "Boards", "board"], ["impediments", "Impediments", "alert"],
              ["standups", "Standups logged", "users"], ["team", "Team members", "user"], ["health", "Health checks", "smile"],
@@ -3666,7 +3755,7 @@ VIEWS.settings = function () {
       </div>
 
       <div class="danger-zone">
-        <div class="row" style="gap:9px;margin-bottom:8px;color:var(--red)">${ic("alert", 17)}<b style="font-size:13.5px">Danger zone</b></div>
+        <div class="row" style="gap:9px;margin-bottom:8px;color:var(--red)">${ic("alert", 17)}<b style="font-size:13.5px">${_t("Danger zone")}</b></div>
         <p class="tiny muted" style="line-height:1.6;margin-bottom:14px">
           Deletes every Sprint, board, impediment, standup, agreement, decision and note in this workspace${folder ? ", including the JSON files in your folder" : ""}. There is no undo.</p>
         <button class="btn btn-danger" data-action="reset-workspace">${ic("trash", 14)}Reset this workspace</button>
@@ -3698,14 +3787,14 @@ function renderTimer() {
     <span class="t">${over ? "-" : ""}${mm}:${ss}</span>
     <span class="lbl">${esc(t.label || "Timebox")}</span>
     <button data-action="timer-toggle" title="${t.endsAt ? "Pause" : "Resume"}">${ic(t.endsAt ? "minus" : "chevR", 14, 2.6)}</button>
-    <button data-action="timer-add" title="Add five minutes">${ic("plus", 14, 2.6)}</button>
-    <button data-action="timer-stop" title="Stop">${ic("x", 14, 2.6)}</button>
+    <button data-action="timer-add" title="${_t("Add five minutes")}">${ic("plus", 14, 2.6)}</button>
+    <button data-action="timer-stop" title="${_t("Stop")}">${ic("x", 14, 2.6)}</button>
   </div>`;
 
   // One announcement per timebox, the moment it runs out.
   if (over && !t.announced) {
     t.announced = true;
-    toast("Timebox for " + (t.label || "this event") + " is up.", "warn", 6000);
+    toast(_tp("Timebox for {event} is up.", { event: _t(t.label || "this event") }), "warn", 6000);
   }
 }
 
@@ -3731,20 +3820,20 @@ function renderPanel() {
   if (ui.panel === "alerts") {
     const list = alertItems();
     host.innerHTML = `<div class="panel">
-      <div class="panel-head"><span>Alerts</span><span class="tiny dim">${list.length ? pluralise(list.length, "item") : "all clear"}</span></div>
+      <div class="panel-head"><span>${_t("Alerts")}</span><span class="tiny dim">${list.length ? pluralise(list.length, "item") : "all clear"}</span></div>
       <div class="panel-body">${list.length ? list.map(a => `<button class="panel-row" style="width:100%;text-align:left" data-action="go" data-view="${a.view}">
           <span style="color:var(--red);margin-top:2px">${ic(a.icon, 14)}</span>
           <span class="grow">${esc(a.text)}</span><span class="when">${esc(a.when)}</span></button>`).join("")
-        : `<div class="empty sm"><span class="ic">${ic("checkCircle", 18)}</span><p class="tiny">Nothing overdue. Nice.</p></div>`}</div>
+        : `<div class="empty sm"><span class="ic">${ic("checkCircle", 18)}</span><p class="tiny">${_t("Nothing overdue. Nice.")}</p></div>`}</div>
     </div>`;
   } else if (ui.panel === "activity") {
     const list = S.activity.items.slice(0, 60);
     host.innerHTML = `<div class="panel">
-      <div class="panel-head"><span>Recent activity</span>${list.length ? `<button class="tiny link" data-action="clear-activity">Clear</button>` : ""}</div>
+      <div class="panel-head"><span>${_t("Recent activity")}</span>${list.length ? `<button class="tiny link" data-action="clear-activity">${_t("Clear")}</button>` : ""}</div>
       <div class="panel-body">${list.length ? list.map(a => `<div class="panel-row">
           <span style="color:var(--text-3);margin-top:2px">${ic({ create: "plus", update: "edit", delete: "trash", move: "arrowR" }[a.kind] || "info", 13)}</span>
           <span class="grow">${esc(a.text)}</span><span class="when">${esc(relTime(a.at))}</span></div>`).join("")
-        : `<div class="empty sm"><span class="ic">${ic("zap", 18)}</span><p class="tiny">No activity recorded yet.</p></div>`}</div>
+        : `<div class="empty sm"><span class="ic">${ic("zap", 18)}</span><p class="tiny">${_t("No activity recorded yet.")}</p></div>`}</div>
     </div>`;
   }
 }
@@ -3778,16 +3867,18 @@ function taskFields(board, task) {
   return [
     { name: "title", label: "Task", type: "text", required: true, placeholder: "What needs to happen?" },
     { name: "description", label: "Details", type: "textarea", rows: 3, placeholder: "Context, acceptance criteria, links…" },
-    { name: "columnId", label: "Column", type: "select", half: true, full: false, options: board.columns.map(c => ({ value: c.id, label: c.name })) },
+    { name: "columnId", label: "Column", type: "select", half: true, full: false, raw: true, options: board.columns.map(c => ({ value: c.id, label: c.name })) },
     { name: "points", label: "Story points", type: "number", half: true, full: false, min: 0, max: 100 },
     {
       name: "sprintId", label: "Sprint", type: "select", half: true, full: false,
-      options: [{ value: "", label: "— not in a Sprint —" }].concat(sprints.map(s => ({ value: s.id, label: s.name + (s.status === "active" ? " (active)" : "") }))),
+      raw: true,
+      options: [{ value: "", label: _t("— not in a Sprint —") }].concat(sprints.map(s => ({ value: s.id, label: s.name + (s.status === "active" ? _t(" (active)") : "") }))),
     },
     { name: "priority", label: "Priority", type: "select", half: true, full: false, options: PRIORITIES },
     {
       name: "assignee", label: "Assignee", type: names.length ? "select" : "text", half: true, full: false,
-      options: [{ value: "", label: "— nobody —" }].concat(names.map(n => ({ value: n, label: n }))),
+      raw: true,
+      options: [{ value: "", label: _t("— nobody —") }].concat(names.map(n => ({ value: n, label: n }))),
       placeholder: "Name — becomes an initials badge",
     },
     { name: "due", label: "Due date", type: "date", half: true, full: false },
@@ -4016,7 +4107,8 @@ function retroFields() {
     { name: "date", label: "Date", type: "date", half: true, full: false },
     {
       name: "sprintId", label: "Sprint", type: "select", half: true, full: false,
-      options: [{ value: "", label: "— not linked —" }].concat(sprints.map(s => ({ value: s.id, label: s.name }))),
+      raw: true,
+      options: [{ value: "", label: _t("— not linked —") }].concat(sprints.map(s => ({ value: s.id, label: s.name }))),
     },
     {
       name: "format", label: "Format used", type: "select", half: true, full: false,
@@ -4135,7 +4227,7 @@ function decisionRecordHTML(d) {
     ${block("History", hist.length ? `<div class="timeline">${hist.map(h => `<div class="tl-item">
         <div class="when">${esc(fmtDate(h.at))} · ${esc(relTime(h.at))}</div>
         <div class="what">${esc(h.text)}</div></div>`).join("")}</div>`
-      : '<p class="tiny dim">No changes recorded yet.</p>')}`;
+      : '<p class="tiny dim">' + esc(_t("No changes recorded yet.")) + '</p>')}`;
 }
 function diffSummary(before, after) {
   const labels = {
@@ -4164,8 +4256,8 @@ function deleteFrom(domain, id, label) {
   const item = byId(S[domain].items, id);
   if (!item) return;
   confirmDialog({
-    title: "Delete this " + label + "?",
-    message: "“" + String(itemLabel(item, label)).slice(0, 80) + "” will be removed. This cannot be undone.",
+    title: _tp("Delete this {thing}?", { thing: _t(label) }),
+    message: _tp("“{name}” will be removed. This cannot be undone.", { name: String(itemLabel(item, label)).slice(0, 80) }),
     confirmLabel: "Delete", danger: true,
     onConfirm: () => mutate(domain, () => {
       S[domain].items = S[domain].items.filter(x => x.id !== id);
@@ -4219,7 +4311,7 @@ const ACTIONS = {
     openModal({
       title: "Keyboard shortcuts", subtitle: "They work anywhere except inside a text field.",
       width: "narrow", fields: [], cancelLabel: "Close",
-      bottomHTML: `<div class="keys">${SHORTCUTS.map(s => `<div><span>${esc(s[1])}</span><kbd>${esc(s[0])}</kbd></div>`).join("")}</div>`,
+      bottomHTML: `<div class="keys">${SHORTCUTS.map(s => `<div><span>${esc(_t(s[1]))}</span><kbd>${esc(s[0])}</kbd></div>`).join("")}</div>`,
     });
   },
 
@@ -4273,7 +4365,7 @@ const ACTIONS = {
     if (!ok) { toast("Permission denied — your files were not touched.", "warn", 5000); return; }
     Store.mode = "folder"; Store.dir = h; Store.folderName = h.name;
     await start();
-    toast("Reconnected to " + h.name + ".", "ok");
+    toast(_tp("Reconnected to {name}.", { name: h.name }), "ok");
   },
   async "switch-to-folder"() {
     try {
@@ -4286,7 +4378,7 @@ const ACTIONS = {
       await flush();
       S.settings.storageMode = "folder";
       render();
-      toast("Everything copied into " + Store.folderName + ".", "ok", 4000);
+      toast(_tp("Everything copied into {name}.", { name: Store.folderName }), "ok", 4000);
     } catch (e) {
       if (e && e.name === "AbortError") return;
       toast(e && e.message ? e.message : "Could not switch storage.", "err", 6000);
@@ -4341,7 +4433,7 @@ const ACTIONS = {
         applyTheme();
         logActivity("Imported a backup (" + added + " new, " + updated + " updated)", "create");
         render();
-        toast("Imported: " + added + " new, " + updated + " updated.", "ok", 4500);
+        toast(_tp("Imported: {added} new, {updated} updated.", { added: added, updated: updated }), "ok", 4500);
       };
       reader.readAsText(file);
     });
@@ -4364,6 +4456,20 @@ const ACTIONS = {
   },
 
   /* ---------- theme & settings ---------- */
+  /* Display only: the choice lives in its own localStorage key, never in
+     S.settings, so nothing about the saved workspace changes. An open dialog
+     is closed rather than redrawn — a redraw would throw away unsaved typing. */
+  "set-lang"(el) {
+    const v = el.dataset.lang === "nl" ? "nl" : "en";
+    if (v === LANG) return;
+    LANG = v;
+    try { localStorage.setItem(LANG_KEY, v); } catch (e) { /* private mode */ }
+    closeAllModals();
+    applyLang();
+    render();
+    renderTimer();
+  },
+
   "set-theme"(el) {
     S.settings.theme = el.dataset.theme;
     markDirty("settings");
@@ -4393,7 +4499,7 @@ const ACTIONS = {
           S.boards.items.push(board);
           S.settings.activeBoardId = board.id;
         }, "Created board: " + board.name, "create");
-        toast("Board created with " + pluralise(columns.length, "column") + ".", "ok");
+        toast(_tp("Board created with {cols}.", { cols: pluralise(columns.length, "column") }), "ok");
       },
     });
   },
@@ -4430,7 +4536,7 @@ const ACTIONS = {
         };
         if (!orphans.length) return apply();
         confirmDialog({
-          title: "Move " + pluralise(orphans.length, "task") + "?",
+          title: _tp("Move {tasks}?", { tasks: pluralise(orphans.length, "task") }),
           messageHTML: "You removed " + pluralise(b.columns.length - cols.length, "column") + " that still " +
             (orphans.length === 1 ? "holds a task" : "hold tasks") + ". " +
             pluralise(orphans.length, "task") + " will move to <b>" + esc(cols[0].name) + "</b>.",
@@ -4557,7 +4663,7 @@ const ACTIONS = {
     if (!t) return;
     closeAllModals();
     openModal({
-      title: "Raise an impediment", subtitle: "From the card “" + t.title + "”",
+      title: "Raise an impediment", subtitle: _tp("From the card “{title}”", { title: t.title }),
       width: "wide", fields: IMPEDIMENT_FIELDS,
       values: {
         title: t.blockedReason || ("Blocked: " + t.title),
@@ -4626,7 +4732,7 @@ const ACTIONS = {
     const h = byId(S.health.items, el.dataset.id);
     if (!h) return;
     openModal({
-      title: "Health check · " + fmtDate(h.date), width: "wide", fields: healthFields(), values: h,
+      title: _tp("Health check · {date}", { date: fmtDate(h.date) }), width: "wide", fields: healthFields(), values: h,
       footLeftHTML: deleteFootBtn("delete-health", h.id),
       onSave: v => { closeAllModals(); mutate("health", () => Object.assign(h, v), "Updated a health check", "update"); },
     });
@@ -4636,7 +4742,7 @@ const ACTIONS = {
   /* ---------- timebox timer ---------- */
   "start-timer"(el) {
     startTimer(el.dataset.min, el.dataset.label);
-    toast("Timebox started: " + fmtTimebox(el.dataset.min) + ".", "ok");
+    toast(_tp("Timebox started: {len}.", { len: fmtTimebox(el.dataset.min) }), "ok");
   },
   "timer-toggle"() {
     const t = ui.timer;
@@ -4689,7 +4795,7 @@ const ACTIONS = {
     const c = byId(S.ceremonies.items, el.dataset.id);
     if (!c) return;
     mutate("ceremonies", () => { (c.agenda || []).forEach(a => { a.done = false; }); }, null);
-    toast("Agenda reset for the next " + c.name + ".", "ok");
+    toast(_tp("Agenda reset for the next {event}.", { event: c.name }), "ok");
   },
 
   /* ---------- daily scrum ---------- */
@@ -4732,7 +4838,7 @@ const ACTIONS = {
     const entry = (s.entries || [])[Number(el.dataset.index)];
     if (!entry || !entry.blocker) return;
     openModal({
-      title: "Raise an impediment", subtitle: "From the Daily Scrum of " + fmtDate(s.date),
+      title: "Raise an impediment", subtitle: _tp("From the Daily Scrum of {date}", { date: fmtDate(s.date) }),
       width: "wide", fields: IMPEDIMENT_FIELDS,
       values: {
         title: entry.blocker, description: entry.today ? "Blocking: " + entry.today : "",
@@ -4804,7 +4910,7 @@ const ACTIONS = {
           i.resolution = v.resolution;
           i.resolvedOn = v.resolvedOn || todayISO();
         }, "Cleared impediment: " + i.title + " (" + pluralise(impedimentAge(i), "day") + ")", "update");
-        toast("Cleared after " + pluralise(impedimentAge(i), "day") + ".", "ok");
+        toast(_tp("Cleared after {age}.", { age: pluralise(impedimentAge(i), "day") }), "ok");
       },
     });
   },
@@ -4872,9 +4978,9 @@ const ACTIONS = {
     }, "Started " + s.name, "update");
     if (!running || running.id === s.id) { go(); return; }
     confirmDialog({
-      title: "Close " + running.name + " first?",
+      title: _tp("Close {sprint} first?", { sprint: running.name }),
       message: "Only one Sprint can be active. “" + running.name + "” will be marked closed and its velocity recorded.",
-      confirmLabel: "Start " + s.name,
+      confirmLabel: _tp("Start {sprint}", { sprint: s.name }),
       onConfirm: () => { running.velocity = velocityOf(running); go(); },
     });
   },
@@ -4887,10 +4993,10 @@ const ACTIONS = {
     const next = sortBy(S.sprints.items.filter(o => o.status === "planned" && o.id !== s.id), o => o.start || "9999")[0];
 
     openModal({
-      title: "Close " + s.name, subtitle: "Record what was delivered and decide where the rest goes.",
+      title: _tp("Close {sprint}", { sprint: s.name }), subtitle: "Record what was delivered and decide where the rest goes.",
       fields: unfinished.length ? [{
-        name: "carry", label: "The " + pluralise(unfinished.length, "unfinished item") + " should…", type: "select",
-        options: (next ? [{ value: "next", label: "Move to " + next.name }] : []).concat([
+        name: "carry", label: _tp("The {items} should…", { items: pluralise(unfinished.length, "unfinished item") }), type: "select",
+        options: (next ? [{ value: "next", label: _tp("Move to {sprint}", { sprint: next.name }) }] : []).concat([
           { value: "refine", label: "Go back to Refinement" },
           { value: "keep", label: "Stay on the board as they are" },
         ]),
@@ -4920,7 +5026,7 @@ const ACTIONS = {
             S.refinement.items.forEach((b, i) => { b.order = i; });
           }
         }, "Closed " + s.name + " · " + s.velocity + " delivered", "update");
-        toast("Sprint closed. Velocity recorded: " + s.velocity + ".", "ok", 4000);
+        toast(_tp("Sprint closed. Velocity recorded: {v}.", { v: s.velocity }), "ok", 4000);
       },
     });
   },
@@ -4933,7 +5039,7 @@ const ACTIONS = {
     openModal({
       title: "Correct the burndown", subtitle: "Only fill in the days you want to override.",
       fields: days.map((d, i) => ({
-        name: "d_" + d, label: "Day " + (i + 1) + " · " + fmtShort(d), type: "number",
+        name: "d_" + d, label: _tp("Day {n} · {date}", { n: i + 1, date: fmtShort(d) }), type: "number",
         half: true, full: false, min: 0, max: 9999,
       })),
       values: days.reduce((acc, d) => { acc["d_" + d] = map[d] === undefined ? "" : map[d]; return acc; }, {}),
@@ -4992,7 +5098,7 @@ const ACTIONS = {
     const d = byId(S.decisions.items, el.dataset.id);
     if (!d) return;
     openModal({
-      title: "Decision record", subtitle: "Logged " + fmtDate(d.createdAt || d.date),
+      title: "Decision record", subtitle: _tp("Logged {date}", { date: fmtDate(d.createdAt || d.date) }),
       width: "wide", fields: [], bottomHTML: decisionRecordHTML(d),
       cancelLabel: "Close",
       footLeftHTML: `<button type="button" class="btn btn-ghost btn-sm" data-action="edit-decision" data-id="${d.id}">${ic("edit", 13)}Edit</button>`,
@@ -5091,7 +5197,8 @@ const ACTIONS = {
         });
         S.refinement.items = S.refinement.items.filter(x => x.id !== b.id);
       }, "Pulled “" + b.title + "” into " + (sprint ? sprint.name : "the board"), "move");
-      toast("Added to " + board.columns[0].name + (sprint ? " in " + sprint.name : "") + ".", "ok");
+      toast(sprint ? _tp("Added to {col} in {sprint}.", { col: board.columns[0].name, sprint: sprint.name })
+                   : _tp("Added to {col}.", { col: board.columns[0].name }), "ok");
     };
 
     if (dor.total && !dor.ready) {
@@ -5227,7 +5334,8 @@ const ACTIONS = {
         createdAt: nowISO(), updatedAt: nowISO(), movedAt: nowISO(),
       });
     }, "Created a task from a retro action", "create");
-    toast("Task created in " + board.columns[0].name + (sprint ? " for " + sprint.name : "") + ".", "ok");
+    toast(sprint ? _tp("Task created in {col} for {sprint}.", { col: board.columns[0].name, sprint: sprint.name })
+                 : _tp("Task created in {col}.", { col: board.columns[0].name }), "ok");
   },
 
   /* ---------- risks ---------- */
@@ -5296,25 +5404,25 @@ async function folderHasData() {
 function openFolderConflict(current) {
   $("#modalHost").innerHTML =
     `<div class="overlay"><div class="modal">
-      <div class="modal-head"><div><h3>That folder already has a workspace</h3>
+      <div class="modal-head"><div><h3>${_t("That folder already has a workspace")}</h3>
         <p>${esc(Store.folderName)} contains saved data. Nothing has been written yet — choose what should happen.</p></div></div>
       <div class="modal-body stack">
         <button class="choice" data-action="conflict-load">
           <span class="ic">${ic("folder", 20)}</span>
-          <span><h4>Open the folder's workspace</h4><p>Load what is already there and work on it from now on. Recommended — nothing is overwritten.</p></span>
+          <span><h4>${_t("Open the folder's workspace")}</h4><p>Load what is already there and work on it from now on. Recommended — nothing is overwritten.</p></span>
         </button>
         <button class="choice" data-action="conflict-replace">
           <span class="ic" style="background:var(--red-weak);color:var(--red)">${ic("alert", 20)}</span>
-          <span><h4>Replace it with what I have open</h4><p>Overwrites the JSON files in that folder with the workspace currently on screen. Cannot be undone.</p></span>
+          <span><h4>${_t("Replace it with what I have open")}</h4><p>${_t("Overwrites the JSON files in that folder with the workspace currently on screen. Cannot be undone.")}</p></span>
         </button>
-        <button class="btn btn-ghost btn-block" data-action="modal-close">Cancel</button>
+        <button class="btn btn-ghost btn-block" data-action="modal-close">${_t("Cancel")}</button>
       </div></div></div>`;
   window.__conflictSnapshot = current;
 }
 ACTIONS["conflict-load"] = async function () {
   saveConfig({ mode: "folder" });
   await start();
-  toast("Opened the workspace from " + Store.folderName + ".", "ok", 4000);
+  toast(_tp("Opened the workspace from {name}.", { name: Store.folderName }), "ok", 4000);
 };
 ACTIONS["conflict-replace"] = function () {
   confirmDialog({
@@ -5543,6 +5651,1221 @@ window.addEventListener("beforeunload", ev => {
 });
 
 /* ============================================================================
+   18b. DUTCH CATALOG
+   ---------------------------------------------------------------------------
+   English text is the key; a missing entry simply renders the English. Kept at
+   the foot of the file so the program above stays readable in one pass, and
+   above boot() so it is initialised before the first render.
+
+   Agile and developer vocabulary that Dutch teams already use in English
+   (Sprint, Backlog, Kanban, commit, branch, pull request, deploy …) is
+   deliberately left untranslated: translating it reads as worse Dutch.
+   ========================================================================= */
+const NL = {
+  "Product Owner Workspace": "Product Owner Werkruimte",
+  "Workspace by Tonny Sluijs.": "Werkruimte van Tonny Sluijs.",
+  "Product Owner": "Product Owner",
+  "Overview": "Overzicht",
+  "Taskboard": "Takenbord",
+  "Decision Log": "Besluitenlog",
+  "Roadmap": "Roadmap",
+  "Backlog": "Backlog",
+  "Notes": "Notities",
+  "Documents": "Documenten",
+  "Goals": "Doelen",
+  "Retrospective": "Retrospective",
+  "Retrospectives": "Retrospectives",
+  "Settings": "Instellingen",
+  "Search everything…": "Zoek overal…",
+  "Alerts": "Meldingen",
+  "Recent activity": "Recente activiteit",
+  "Recent Activity": "Recente activiteit",
+  "Open settings": "Instellingen openen",
+  "Good morning": "Goedemorgen",
+  "Good afternoon": "Goedemiddag",
+  "Good evening": "Goedenavond",
+  "Let's build something amazing today.": "Laten we vandaag iets moois bouwen.",
+  "Stay Focused!": "Blijf gefocust!",
+  "{done} of {total} tasks done": "{done} van {total} taken klaar",
+  "Small progress every day adds up to big results.":
+    "Elke dag een beetje vooruitgang levert samen een groot resultaat op.",
+  "Sprint": "Sprint",
+  "your data never leaves this machine": "je gegevens verlaten deze computer nooit",
+  "Built by Tonny Sluijs · free to use": "Gemaakt door Tonny Sluijs · vrij te gebruiken",
+  "Keep Building!": "Blijf bouwen!",
+  "Great products come from great teams and clear decisions.":
+    "Goede producten ontstaan door goede teams en heldere besluiten.",
+  "Save": "Opslaan",
+  "Cancel": "Annuleren",
+  "Delete": "Verwijderen",
+  "Edit": "Bewerken",
+  "Close": "Sluiten",
+  "Confirm": "Bevestigen",
+  "Create": "Aanmaken",
+  "Add": "Toevoegen",
+  "Open": "Openen",
+  "Clear": "Wissen",
+  "Export": "Exporteren",
+  "Import": "Importeren",
+  "Add row": "Rij toevoegen",
+  "Remove row": "Rij verwijderen",
+  "Saving…": "Bezig met opslaan…",
+  "Saved": "Opgeslagen",
+  "Not saved": "Niet opgeslagen",
+  "Created": "Aangemaakt",
+  "Updated": "Bijgewerkt",
+  "Actions": "Acties",
+  "Date": "Datum",
+  "Status": "Status",
+  "Owner": "Eigenaar",
+  "Location": "Locatie",
+  "Type": "Soort",
+  "Name": "Naam",
+  "Item": "Item",
+  "Note": "Notitie",
+  "Risk": "Risico",
+  "Risks": "Risico's",
+  "Session": "Sessie",
+  "Option": "Optie",
+  "Objective": "Doelstelling",
+  "Objectives": "Doelstellingen",
+  "Milestone": "Mijlpaal",
+  "Milestones": "Mijlpalen",
+  "Decision": "Besluit",
+  "Decisions": "Beslissingen",
+  "Document": "Document",
+  "Boards": "Borden",
+  "Backlog items": "Backlog-items",
+  "Total Tasks": "Taken totaal",
+  "Completed": "Afgerond",
+  "Overdue": "Te laat",
+  "Pending decisions": "Openstaande besluiten",
+  "Today": "Vandaag",
+  "Complete": "Afgerond",
+  "Severity": "Ernst",
+  "Impact": "Impact",
+  "Period": "Periode",
+  "Score": "Score",
+  "Value": "Waarde",
+  "Effort": "Inspanning",
+  "Profile": "Profiel",
+  "Appearance": "Weergave",
+  "Theme": "Thema",
+  "Light": "Licht",
+  "Dark": "Donker",
+  "System": "Systeem",
+  "Language": "Taal",
+  "Storage": "Opslag",
+  "{field} is required.": "{field} is verplicht.",
+  "comma, separated": "komma, gescheiden",
+  "all clear": "alles in orde",
+  "Choose the language of the interface. Your saved data is not affected.":
+    "Kies de taal van de interface. Je opgeslagen gegevens veranderen hier niet van.",
+  "task": "taak",
+  "tasks": "taken",
+  "column": "kolom",
+  "columns": "kolommen",
+  "item": "item",
+  "items": "items",
+  "change": "wijziging",
+  "changes": "wijzigingen",
+  "objective": "doelstelling",
+  "objectives": "doelstellingen",
+  "{n} done": "{n} klaar",
+  "{n} overdue": "{n} te laat",
+  "{n}% done": "{n}% klaar",
+  "{n} tracked": "{n} gevolgd",
+  "{n} days late": "{n} dagen te laat",
+  "{n}d overdue": "{n}d te laat",
+  "in {n} days": "over {n} dagen",
+  "{level} impact": "Impact: {level}",
+  "Proposed": "Voorgesteld",
+  "Pending": "In afwachting",
+  "Approved": "Goedgekeurd",
+  "Rejected": "Afgewezen",
+  "Superseded": "Vervangen",
+  "Low": "Laag",
+  "Medium": "Gemiddeld",
+  "High": "Hoog",
+  "Critical": "Kritiek",
+  "impact|Low": "Gering",
+  "impact|Medium": "Matig",
+  "impact|High": "Groot",
+  "impact|Critical": "Kritiek",
+  "Planned": "Gepland",
+  "Active": "Actief",
+  "Done": "Klaar",
+  "At risk": "Risico",
+  "Achieved": "Behaald",
+  "Yellow": "Geel",
+  "Blue": "Blauw",
+  "Green": "Groen",
+  "Pink": "Roze",
+  "Purple": "Paars",
+  "Grey": "Grijs",
+  "Orange": "Oranje",
+  "Red": "Rood",
+  "Other": "Overig",
+  "Your Kanban workspace.": "Je Kanban-werkruimte.",
+  "Taskboard (Kanban)": "Takenbord (Kanban)",
+  "No board yet": "Nog geen bord",
+  "Create your first board. It starts with Backlog, To Do, In Progress, Review and Done — rename, recolour or delete any of them afterwards.":
+    "Maak je eerste bord aan. Het begint met Backlog, To Do, In Progress, Review en Done — je kunt ze daarna hernoemen, verkleuren of verwijderen.",
+  "Create your first Kanban board to start tracking work. It comes with the usual columns — you can rename them any time.":
+    "Maak je eerste Kanban-bord aan om werk bij te houden. Het komt met de gebruikelijke kolommen — je kunt ze altijd hernoemen.",
+  "Create board": "Bord aanmaken",
+  "Edit board": "Bord bewerken",
+  "New board": "Nieuw bord",
+  "New board…": "Nieuw bord…",
+  "Delete board": "Bord verwijderen",
+  "Delete this board?": "Dit bord verwijderen?",
+  "New Task": "Nieuwe taak",
+  "New task": "Nieuwe taak",
+  "Add Task": "Taak toevoegen",
+  "Add task": "Taak toevoegen",
+  "Edit task": "Taak bewerken",
+  "Board": "Bord",
+  "Switch board or create a new one": "Wissel van bord of maak een nieuw bord",
+  "Drag cards between columns, or use the arrows on a card.":
+    "Sleep kaarten tussen kolommen, of gebruik de pijltjes op een kaart.",
+  "Column": "Kolom",
+  "Move left": "Naar links",
+  "Move right": "Naar rechts",
+  "Work-in-progress limit": "WIP-limiet",
+  "No match here": "Hier niets gevonden",
+  "Drop tasks here": "Sleep taken hierheen",
+  "Open full board": "Volledig bord openen",
+  "Open Taskboard": "Takenbord openen",
+  "No columns yet.": "Nog geen kolommen.",
+  "Sprint Progress": "Sprintvoortgang",
+  "Nothing to measure": "Nog niets te meten",
+  "Add tasks and this fills in automatically.": "Voeg taken toe en dit vult zich vanzelf.",
+  "Quick Stats": "Kerncijfers",
+  "A board needs at least one column.": "Een bord heeft minstens één kolom nodig.",
+  "Create a board first.": "Maak eerst een bord aan.",
+  "Board updated.": "Bord bijgewerkt.",
+  "Board created with {cols}.": "Bord aangemaakt met {cols}.",
+  "Move {tasks}?": "{tasks} verplaatsen?",
+  "Move and save": "Verplaatsen en opslaan",
+  "{tasks} moved to {col}.": "{tasks} verplaatst naar {col}.",
+  "Added to {col}.": "Toegevoegd aan {col}.",
+  "Task created in {col}.": "Taak aangemaakt in {col}.",
+  "Finished column corrected: {cols}.": "Kolom voor afgerond werk gecorrigeerd: {cols}.",
+  "Task": "Taak",
+  "What needs to happen?": "Wat moet er gebeuren?",
+  "Details": "Details",
+  "Context, acceptance criteria, links…": "Context, acceptatiecriteria, links…",
+  "Priority": "Prioriteit",
+  "Assignee": "Toegewezen aan",
+  "Name — becomes an initials badge": "Naam — wordt een badge met initialen",
+  "Due date": "Deadline",
+  "Tags": "Tags",
+  "discovery, api, must-have": "discovery, api, must-have",
+  "Board name": "Bordnaam",
+  "e.g. Product Development": "bijv. Productontwikkeling",
+  "Description": "Omschrijving",
+  "Optional one-liner": "Optionele korte omschrijving",
+  "Columns": "Kolommen",
+  "Add column": "Kolom toevoegen",
+  "Include this column": "Deze kolom meenemen",
+  "Include": "Meenemen",
+  "Column name": "Kolomnaam",
+  "Colour": "Kleur",
+  "Untick a column to leave it off this board, or remove the row entirely with ×.":
+    "Vink een kolom uit om hem van dit bord te laten, of verwijder de rij helemaal met ×.",
+  "Which column means finished?": "Welke kolom betekent klaar?",
+  "Tasks in this column are struck through and count towards the progress percentage.":
+    "Taken in deze kolom worden doorgestreept en tellen mee in het voortgangspercentage.",
+  "The finished column is chosen under Edit board — a column added here is never the finished one.":
+    "De kolom voor afgerond werk kies je onder Bord bewerken — een kolom die je hier toevoegt is dat nooit.",
+  "Untick any column you do not want, or add your own.":
+    "Vink kolommen uit die je niet wilt, of voeg je eigen kolommen toe.",
+  "e.g. Blocked": "bijv. Geblokkeerd",
+  "A single glance at where the product stands today.": "In één oogopslag zien waar het product vandaag staat.",
+  "Why things were decided, kept for later": "Waarom dingen besloten zijn, bewaard voor later",
+  "New Decision": "Nieuw besluit",
+  "Open decision log": "Besluitenlog openen",
+  "Log your first decision": "Leg je eerste besluit vast",
+  "View all decisions": "Alle besluiten bekijken",
+  "Product Goals": "Productdoelen",
+  "Current period": "Huidige periode",
+  "No objectives yet.": "Nog geen doelstellingen.",
+  "View Goals": "Doelen bekijken",
+  "Notes & Reminders": "Notities & herinneringen",
+  "Nothing noted down yet.": "Nog niets genoteerd.",
+  "Add Note": "Notitie toevoegen",
+  "Risk Monitor": "Risicomonitor",
+  "Edit risk": "Risico bewerken",
+  "No risks flagged.": "Geen risico's gemeld.",
+  "Add Risk": "Risico toevoegen",
+  "Your changes will show up here.": "Je wijzigingen verschijnen hier.",
+  "View All Activity": "Alle activiteit bekijken",
+  "Upcoming Milestones": "Komende mijlpalen",
+  "No milestones": "Geen mijlpalen",
+  "No date": "Geen datum",
+  "Plan releases on the Roadmap.": "Plan releases op de Roadmap.",
+  "View Roadmap": "Roadmap bekijken",
+  "Nothing overdue. Nice.": "Niets te laat. Mooi.",
+  "No activity recorded yet.": "Nog geen activiteit vastgelegd.",
+  "The record of what was decided, by whom, and — most importantly — why.":
+    "Het overzicht van wat besloten is, door wie, en — het belangrijkste — waarom.",
+  "Problem statement": "Probleemstelling",
+  "Approved by": "Goedgekeurd door",
+  "No decisions logged": "Nog geen besluiten vastgelegd",
+  "Nothing decided yet": "Nog niets besloten",
+  "No decisions match": "Geen besluiten gevonden",
+  "Every meaningful choice you record here comes back with its full reasoning months from now — problem, options you rejected, and why.":
+    "Elke betekenisvolle keuze die je hier vastlegt, komt maanden later terug met de volledige redenering — probleem, afgewezen opties, en waarom.",
+  "Log a decision the moment you make it: the problem, the options you turned down, the reason you chose this one. Six months from now that context is the whole point.":
+    "Leg een besluit vast op het moment dat je het neemt: het probleem, de opties die je afwees, en waarom je hiervoor koos. Over zes maanden is juist die context het punt.",
+  "Log a decision": "Besluit vastleggen",
+  "Edit decision": "Besluit bewerken",
+  "Save decision": "Besluit opslaan",
+  "Decision record": "Besluitdossier",
+  "Decision logged.": "Besluit vastgelegd.",
+  "Decision taken": "Genomen besluit",
+  "Decision date": "Datum besluit",
+  "Logged {date}": "Vastgelegd op {date}",
+  "What question needed answering?": "Welke vraag moest beantwoord worden?",
+  "What did you settle on?": "Waar heb je voor gekozen?",
+  "Why this one?": "Waarom deze?",
+  "The reasoning you will have forgotten in six months.": "De redenering die je over zes maanden vergeten bent.",
+  "This is the field that pays for itself later.": "Dit is het veld dat zich later terugbetaalt.",
+  "Options considered": "Overwogen opties",
+  "Why it was not chosen": "Waarom niet gekozen",
+  "Recording the roads not taken stops the same debate happening twice.":
+    "Door vast te leggen wat je niet koos, voorkom je dat dezelfde discussie twee keer gevoerd wordt.",
+  "Add option": "Optie toevoegen",
+  "Capture the reasoning while it is still fresh.": "Leg de redenering vast nu die nog vers is.",
+  "Every change is added to this record's history.":
+    "Elke wijziging wordt toegevoegd aan de historie van dit dossier.",
+  "No changes recorded yet.": "Nog geen wijzigingen vastgelegd.",
+  "{changes} recorded in history.": "{changes} vastgelegd in de historie.",
+  "Nothing changed.": "Er is niets gewijzigd.",
+  "Revisit by": "Opnieuw bekijken op",
+  "Pending decisions past this date show up in your alerts.":
+    "Openstaande besluiten na deze datum verschijnen bij je meldingen.",
+  "Their role": "Hun rol",
+  "e.g. CTO": "bijv. CTO",
+  "architecture, pricing": "architectuur, prijsstelling",
+  "Milestones and releases, grouped by quarter.": "Mijlpalen en releases, gegroepeerd per kwartaal.",
+  "New milestone": "Nieuwe mijlpaal",
+  "Add milestone": "Mijlpaal toevoegen",
+  "Edit milestone": "Mijlpaal bewerken",
+  "No milestones yet": "Nog geen mijlpalen",
+  "Add the dates that matter — MVP, beta, launch — and the Overview will start counting down to them.":
+    "Voeg de data toe die ertoe doen — MVP, bèta, lancering — en het Overzicht telt er vanzelf naartoe af.",
+  "Add your first milestone": "Voeg je eerste mijlpaal toe",
+  "Target date": "Streefdatum",
+  "e.g. MVP Release": "bijv. MVP-release",
+  "e.g. Q3 2026": "bijv. Q3 2026",
+  "Everything not yet scheduled, in priority order. Drag to re-rank.":
+    "Alles wat nog niet ingepland is, op volgorde van prioriteit. Sleep om te herschikken.",
+  "New Item": "Nieuw item",
+  "New backlog item": "Nieuw backlog-item",
+  "Edit backlog item": "Backlog-item bewerken",
+  "Add item": "Item toevoegen",
+  "Backlog is empty": "De backlog is leeg",
+  "Park ideas and requests here with a value and effort estimate, then promote the best ones onto the board.":
+    "Parkeer ideeën en verzoeken hier met een waarde- en inspanningsschatting, en promoveer de beste naar het bord.",
+  "Drag to reorder": "Sleep om te herschikken",
+  "Business value": "Businesswaarde",
+  "Business value (1–10)": "Businesswaarde (1–10)",
+  "Effort estimate": "Inspanningsschatting",
+  "Effort (1–10)": "Inspanning (1–10)",
+  "Value ÷ effort": "Waarde ÷ inspanning",
+  "Promote to a task on the board": "Promoveren naar een taak op het bord",
+  "Idea, request or feature": "Idee, verzoek of feature",
+  "Quick thoughts, follow-ups and things you must not forget.":
+    "Snelle gedachten, opvolgacties en dingen die je niet mag vergeten.",
+  "New note": "Nieuwe notitie",
+  "Add note": "Notitie toevoegen",
+  "Edit note": "Notitie bewerken",
+  "No notes yet": "Nog geen notities",
+  "Jot down anything you would otherwise lose in a chat thread. Add a reminder date and it will show up in your alerts.":
+    "Noteer wat je anders kwijtraakt in een chat. Voeg een herinneringsdatum toe en het verschijnt bij je meldingen.",
+  "What do you want to remember?": "Wat wil je onthouden?",
+  "Remind me on": "Herinner me op",
+  "A register of where the important documents actually live.":
+    "Een register van waar de belangrijke documenten echt staan.",
+  "Add Document": "Document toevoegen",
+  "Add document": "Document toevoegen",
+  "Edit document": "Document bewerken",
+  "No documents registered": "Geen documenten geregistreerd",
+  "Link the PRD, the designs, the analytics dashboard — anything you keep hunting for. Links only; nothing is uploaded.":
+    "Link de PRD, de designs, het analytics-dashboard — alles waar je steeds naar zoekt. Alleen links; er wordt niets geüpload.",
+  "Add your first link": "Voeg je eerste link toe",
+  "Link or path": "Link of pad",
+  "https://… or C:\\Docs\\prd.docx": "https://… of C:\\Docs\\prd.docx",
+  "e.g. Product Requirements v2": "bijv. Product Requirements v2",
+  "That location is not a link this browser can open — copy it manually.":
+    "Deze locatie is geen link die deze browser kan openen — kopieer hem handmatig.",
+  "Objectives and the key results that prove them. Progress is calculated, not typed.":
+    "Doelstellingen en de key results die ze aantonen. Voortgang wordt berekend, niet ingetypt.",
+  "New Objective": "Nieuwe doelstelling",
+  "New objective": "Nieuwe doelstelling",
+  "Add objective": "Doelstelling toevoegen",
+  "Edit objective": "Doelstelling bewerken",
+  "No objectives yet": "Nog geen doelstellingen",
+  "Set an objective, add two or three key results, and tick them off. The percentage takes care of itself.":
+    "Stel een doelstelling op, voeg twee of drie key results toe en vink ze af. Het percentage regelt zichzelf.",
+  "Set your first objective": "Stel je eerste doelstelling op",
+  "No key results yet — edit this objective to add some.":
+    "Nog geen key results — bewerk deze doelstelling om ze toe te voegen.",
+  "Key results": "Key results",
+  "Add key result": "Key result toevoegen",
+  "Measurable result": "Meetbaar resultaat",
+  "What outcome are you after?": "Welk resultaat wil je bereiken?",
+  "What went well, what did not, and what you are actually going to do about it.":
+    "Wat ging goed, wat niet, en wat je er daadwerkelijk aan gaat doen.",
+  "New retrospective": "Nieuwe retrospective",
+  "Edit retrospective": "Retrospective bewerken",
+  "Save session": "Sessie opslaan",
+  "No retrospectives yet": "Nog geen retrospectives",
+  "Record each session so patterns become visible over time — and so action items do not quietly disappear.":
+    "Leg elke sessie vast zodat patronen zichtbaar worden — en actiepunten niet stilletjes verdwijnen.",
+  "Went well": "Ging goed",
+  "Went wrong": "Ging mis",
+  "Action items": "Actiepunten",
+  "Nothing recorded.": "Niets vastgelegd.",
+  "Create a task from this": "Maak hier een taak van",
+  "What worked": "Wat werkte",
+  "What did not work": "Wat niet werkte",
+  "What you will change": "Wat je gaat veranderen",
+  "Add action": "Actie toevoegen",
+  "e.g. Sprint 12 retrospective": "bijv. Sprint 12 retrospective",
+  "What could go wrong?": "Wat kan er misgaan?",
+  "What reduces it?": "Wat verkleint het?",
+  "Mitigation": "Beheersmaatregel",
+  "Add risk": "Risico toevoegen",
+  "Your profile, appearance and where this workspace is stored.":
+    "Je profiel, weergave en waar deze werkruimte wordt opgeslagen.",
+  "Your name": "Je naam",
+  "Your role": "Je rol",
+  "e.g. Product Owner": "bijv. Product Owner",
+  "Workspace name": "Naam werkruimte",
+  "e.g. Platform 2026": "bijv. Platform 2026",
+  "Shown under the greeting in the header.": "Wordt onder de begroeting in de koptekst getoond.",
+  "“System” follows your Windows light/dark setting. Your choice is saved with the workspace.":
+    "“Systeem” volgt je Windows-instelling voor licht/donker. Je keuze wordt bij de werkruimte opgeslagen.",
+  "Each section is a separate JSON file in that folder. A change saves that one file — the rest are left alone.":
+    "Elke sectie is een apart JSON-bestand in die map. Een wijziging slaat alleen dat ene bestand op — de rest blijft ongemoeid.",
+  "Saved in this browser's local storage. Clearing site data for this page deletes the workspace, so keep a backup copy.":
+    "Opgeslagen in de local storage van deze browser. Als je de sitegegevens wist, verdwijnt de werkruimte — houd dus een back-up.",
+  "Switch storage location": "Opslaglocatie wijzigen",
+  "Everything you have now is copied to the new location.":
+    "Alles wat je nu hebt wordt naar de nieuwe locatie gekopieerd.",
+  "Folder storage needs Chrome or Edge.": "Opslag in een map vereist Chrome of Edge.",
+  "Use this browser": "Deze browser gebruiken",
+  "Choose a folder": "Kies een map",
+  "Backup copy": "Back-up",
+  "Download the whole workspace as one JSON file, or restore one you saved earlier. Importing merges by id and never deletes what it does not recognise.":
+    "Download de hele werkruimte als één JSON-bestand, of zet een eerder opgeslagen bestand terug. Importeren voegt samen op id en verwijdert nooit wat het niet herkent.",
+  "What is in this workspace": "Wat er in deze werkruimte zit",
+  "Danger zone": "Gevarenzone",
+  "Deletes every board, decision, note, goal, milestone and document in this workspace":
+    "Verwijdert elk bord, besluit, elke notitie, doelstelling, mijlpaal en document in deze werkruimte",
+  ", including the JSON files in your folder": ", inclusief de JSON-bestanden in je map",
+  "There is no undo.": "Dit kan niet ongedaan gemaakt worden.",
+  "Reset this workspace": "Werkruimte resetten",
+  "Reset this workspace?": "Werkruimte resetten?",
+  "Delete everything": "Alles verwijderen",
+  "Backup downloaded.": "Back-up gedownload.",
+  "That file is not valid JSON.": "Dat bestand is geen geldige JSON.",
+  "Nothing recognisable in that file.": "Niets herkenbaars in dat bestand.",
+  "Imported: {added} new, {updated} updated.": "Geïmporteerd: {added} nieuw, {updated} bijgewerkt.",
+  "Could not save: {msg}": "Opslaan mislukt: {msg}",
+  "Delete this {thing}?": "Deze {thing} verwijderen?",
+  "“{name}” will be removed. This cannot be undone.":
+    "“{name}” wordt verwijderd. Dit kan niet ongedaan gemaakt worden.",
+  "Type {word} to confirm": "Typ {word} om te bevestigen",
+  "Type {word} exactly to confirm.": "Typ exact {word} om te bevestigen.",
+  "Try a different filter or clear the search box.": "Probeer een ander filter of maak het zoekveld leeg.",
+  "Welcome to your PO Dashboard": "Welkom bij je PO Dashboard",
+  "Everything you create stays on this machine. Choose where it should live — you can switch later in Settings.":
+    "Alles wat je maakt blijft op deze computer. Kies waar het moet staan — je kunt later wisselen in Instellingen.",
+  "Store in this browser": "Opslaan in deze browser",
+  "Saved instantly to this browser's local storage. Nothing to set up — but the data is tied to this browser profile and is lost if you clear site data.":
+    "Direct opgeslagen in de local storage van deze browser. Niets in te stellen — maar de gegevens horen bij dit browserprofiel en verdwijnen als je de sitegegevens wist.",
+  "Store in a folder on my computer": "Opslaan in een map op mijn computer",
+  "Each section is written as its own readable JSON file — <code>boards.json</code>, <code>decisions.json</code>, and so on.":
+    "Elke sectie wordt weggeschreven als een eigen leesbaar JSON-bestand — <code>boards.json</code>, <code>decisions.json</code>, enzovoort.",
+  "If the folder already contains a workspace, it is loaded, never wiped. Back it up or sync it however you like.":
+    "Als de map al een werkruimte bevat, wordt die geladen en nooit gewist. Back-uppen of synchroniseren mag je helemaal zelf weten.",
+  "Folder storage is unavailable in this browser.": "Opslag in een map is niet beschikbaar in deze browser.",
+  "It needs Chrome or Edge.": "Het vereist Chrome of Edge.",
+  "If you are already in Chrome, open this file through a local server (<code>python -m http.server</code> in this folder, then visit <code>localhost:8000</code>) and the option will appear.":
+    "Als je al in Chrome zit, open dit bestand dan via een lokale server (<code>python -m http.server</code> in deze map, ga daarna naar <code>localhost:8000</code>) en de optie verschijnt.",
+  "Your workspace starts completely empty — no sample tasks, no placeholder people.":
+    "Je werkruimte begint helemaal leeg — geen voorbeeldtaken, geen fictieve teamleden.",
+  "Reconnect your workspace folder": "Verbind je werkmap opnieuw",
+  "Browsers ask again each session before a page may touch your files.":
+    "Browsers vragen elke sessie opnieuw toestemming voordat een pagina je bestanden mag benaderen.",
+  "Folder:": "Map:",
+  "Reconnect and load my data": "Opnieuw verbinden en mijn gegevens laden",
+  "Choose a different location instead": "Kies liever een andere locatie",
+  "That folder already has a workspace": "Die map bevat al een werkruimte",
+  "{name} contains saved data. Nothing has been written yet — choose what should happen.":
+    "{name} bevat opgeslagen gegevens. Er is nog niets weggeschreven — kies wat er moet gebeuren.",
+  "Open the folder's workspace": "De werkruimte uit de map openen",
+  "Load what is already there and work on it from now on. Recommended — nothing is overwritten.":
+    "Laad wat er al staat en werk daar vanaf nu in verder. Aanbevolen — er wordt niets overschreven.",
+  "Replace it with what I have open": "Vervang die door wat ik nu open heb",
+  "Overwrites the JSON files in that folder with the workspace currently on screen. Cannot be undone.":
+    "Overschrijft de JSON-bestanden in die map met de werkruimte die nu op het scherm staat. Kan niet ongedaan gemaakt worden.",
+  "Overwrite": "Overschrijven",
+  "Overwrite the files in that folder?": "De bestanden in die map overschrijven?",
+  "Copy to browser": "Kopieer naar browser",
+  "Store in this browser instead?": "In plaats daarvan in deze browser opslaan?",
+  "Now saving in this browser.": "Wordt nu in deze browser opgeslagen.",
+  "Workspace created in this browser.": "Werkruimte aangemaakt in deze browser.",
+  "Workspace folder connected.": "Werkmap verbonden.",
+  "Folder overwritten with your current workspace.": "Map overschreven met je huidige werkruimte.",
+  "Loaded the workspace already in that folder.": "De werkruimte die al in die map stond is geladen.",
+  "Opened the workspace from {name}.": "Werkruimte geopend vanuit {name}.",
+  "Reconnected to {name}.": "Opnieuw verbonden met {name}.",
+  "Everything copied into {name}.": "Alles gekopieerd naar {name}.",
+  "Could not open that folder.": "Kon die map niet openen.",
+  "Could not switch storage.": "Kon de opslag niet wijzigen.",
+  "Permission denied — your files were not touched.": "Toestemming geweigerd — je bestanden zijn niet aangeraakt.",
+  "This browser will not remember the folder — you will be asked to pick it again next time.":
+    "Deze browser onthoudt de map niet — je wordt de volgende keer opnieuw gevraagd om hem te kiezen.",
+  ".json is not valid JSON — it was skipped, not overwritten.":
+    ".json is geen geldige JSON — het is overgeslagen, niet overschreven.",
+  "Developer Workspace": "Developer Werkruimte",
+  "by Tonny Sluijs": "van Tonny Sluijs",
+  "Snippets": "Snippets",
+  "Commands": "Commando's",
+  "Stack": "Stack",
+  "Tech Debt": "Tech debt",
+  "Tech debt": "Tech debt",
+  "Tech debt items": "Tech debt-items",
+  "Links": "Links",
+  "Link": "Link",
+  "Checklists": "Checklists",
+  "Welcome to your Developer Dashboard": "Welkom bij je Developer Dashboard",
+  "Your profile, how you work, and where the workspace is stored.":
+    "Je profiel, hoe je werkt, en waar de werkruimte wordt opgeslagen.",
+  "How you work": "Hoe je werkt",
+  "In this workspace": "In deze werkruimte",
+  "View All": "Alles bekijken",
+  "Focus": "Focus",
+  "Stop": "Stoppen",
+  "Add five minutes": "Vijf minuten erbij",
+  "Focus session (minutes)": "Focussessie (minuten)",
+  "What the Focus button and the <kbd>f</kbd> shortcut start.":
+    "Wat de Focus-knop en de sneltoets <kbd>f</kbd> starten.",
+  "Keyboard shortcuts": "Sneltoetsen",
+  "Show the list": "Toon de lijst",
+  "Or press <kbd>?</kbd> anywhere.": "Of druk overal op <kbd>?</kbd>.",
+  "They work anywhere except inside a text field.": "Ze werken overal, behalve in een tekstveld.",
+  "Your boards": "Je borden",
+  "Your flow": "Je flow",
+  "Board flow": "Bordflow",
+  "One board per project or repo.": "Eén bord per project of repo.",
+  "Make one board per project or repo. Switch between them from the dropdown, and the flow numbers add up across all of them.":
+    "Maak één bord per project of repo. Wissel ertussen via het dropdownmenu; de flowcijfers tellen op over alle borden.",
+  "Create one board per project. It starts with Backlog, To Do, In Progress, In Review and Done — rename, recolour, WIP-limit or delete any of them afterwards.":
+    "Maak één bord per project. Het begint met Backlog, To Do, In Progress, In Review en Done — je kunt ze daarna hernoemen, verkleuren, een WIP-limiet geven of verwijderen.",
+  "Create a board": "Maak een bord",
+  "Add a second board": "Voeg een tweede bord toe",
+  "One per project — e.g. Checkout API, or Personal": "Eén per project — bijv. Checkout API, of Persoonlijk",
+  "e.g. Checkout API": "bijv. Checkout API",
+  "Open the full board": "Volledig bord openen",
+  "Opens straight from the board header.": "Opent direct vanuit de bordkop.",
+  "WIP limit": "WIP-limiet",
+  "Over the WIP limit:": "Boven de WIP-limiet:",
+  "Story points in this column": "Story points in deze kolom",
+  "Estimate": "Schatting",
+  "Points, hours, t-shirt number — whatever you already think in.":
+    "Punten, uren, t-shirtmaat — waar je toch al in denkt.",
+  "Branch": "Branch",
+  "feat/checkout-retry": "feat/checkout-retry",
+  "Copyable straight from the card.": "Direct vanaf de kaart te kopiëren.",
+  "Copy the branch name": "Kopieer de branchnaam",
+  "PR or issue": "PR of issue",
+  "https://github.com/…/pull/42": "https://github.com/…/pull/42",
+  "Blocked": "Geblokkeerd",
+  "This is blocked": "Dit is geblokkeerd",
+  "Blocked by what?": "Waardoor geblokkeerd?",
+  "Waiting on review, API, decision…": "Wacht op review, API, besluit…",
+  "Record this as tech debt": "Leg dit vast als tech debt",
+  "Put it on the board": "Zet het op het bord",
+  "In progress": "Onderhanden",
+  "Started and not finished, across every board.": "Gestart en niet afgerond, over alle borden.",
+  "Cycle time (days)": "Doorlooptijd (dagen)",
+  "Done / 14 days": "Klaar / 14 dagen",
+  "What you actually shipped.": "Wat je daadwerkelijk hebt opgeleverd.",
+  "Add cards and this fills in.": "Voeg kaarten toe en dit vult zich vanzelf.",
+  "What you are working on, and what is in the way of finishing it.":
+    "Waar je aan werkt, en wat afronden in de weg staat.",
+  "finished card": "afgeronde kaart",
+  "finished cards": "afgeronde kaarten",
+  "Kind": "Soort",
+  "Bug": "Bug",
+  "Chore": "Klus",
+  "Refactor": "Refactor",
+  "Spike": "Spike",
+  "Title": "Titel",
+  "Optional": "Optioneel",
+  "Local": "Lokaal",
+  "Staging": "Staging",
+  "Production": "Productie",
+  "New snippet": "Nieuwe snippet",
+  "Edit snippet": "Snippet bewerken",
+  "Save snippet": "Snippet opslaan",
+  "No snippets yet": "Nog geen snippets",
+  "No snippet matches": "Geen snippet gevonden",
+  "Nothing saved yet.": "Nog niets opgeslagen.",
+  "The bits of code you rewrite from memory every few months. Now you do not have to.":
+    "De stukjes code die je elke paar maanden uit je hoofd herschrijft. Nu hoeft dat niet meer.",
+  "Paste the thing you always end up looking up — the debounce, the awkward SQL join, the regex that took an hour. One click copies it back out.":
+    "Plak datgene wat je toch altijd weer opzoekt — de debounce, die lastige SQL-join, de regex die een uur kostte. Eén klik kopieert het terug.",
+  "What it does": "Wat het doet",
+  "Debounce a function": "Een functie debouncen",
+  "Code": "Code",
+  "Paste it here.": "Plak het hier.",
+  "Copy the code": "Kopieer de code",
+  "Why you keep coming back to it.": "Waarom je er steeds op terugkomt.",
+  "Try another language filter, or clear the search box.":
+    "Probeer een ander taalfilter, of maak het zoekveld leeg.",
+  "react, utils": "react, utils",
+  "New command": "Nieuw commando",
+  "Edit command": "Commando bewerken",
+  "Save command": "Commando opslaan",
+  "Command": "Commando",
+  "No commands yet": "Nog geen commando's",
+  "No command matches": "Geen commando gevonden",
+  "Your own cheatsheet. The flags you re-google, in one place, one click from the clipboard.":
+    "Je eigen spiekbriefje. De flags die je steeds opnieuw googelt, op één plek, één klik van je klembord.",
+  "Save the ones that never stick: the docker compose incantation, the migration rollback, the git recovery you only need when everything is on fire.":
+    "Bewaar wat nooit blijft hangen: die docker compose-toverspreuk, de migratie-rollback, de git-redding die je alleen nodig hebt als alles in brand staat.",
+  "Copy": "Kopiëer",
+  "Could not reach the clipboard.": "Kon het klembord niet bereiken.",
+  "Category": "Categorie",
+  "Try a different search.": "Probeer een andere zoekterm.",
+  "danger, recovery": "gevaar, herstel",
+  "Service": "Service",
+  "Services": "Services",
+  "Add a service": "Voeg een service toe",
+  "Add service": "Service toevoegen",
+  "Edit service": "Service bewerken",
+  "Nothing in the stack yet": "Nog niets in de stack",
+  "No service matches": "Geen service gevonden",
+  "No environments recorded yet.": "Nog geen omgevingen vastgelegd.",
+  "Every service, and what it answers on. The end of “what port was that again?”.":
+    "Elke service, en waarop hij antwoordt. Einde aan “op welke poort draaide dat ook alweer?”.",
+  "List the services you work against with their local port and their staging and production URLs. It pays for itself the first Monday back from holiday.":
+    "Zet de services waar je tegenaan werkt op een rij met hun lokale poort en hun staging- en productie-URL's. Het verdient zich terug op je eerste maandag terug van vakantie.",
+  "How to run it, which env vars it needs by name, what breaks first.":
+    "Hoe je hem draait, welke env vars hij nodig heeft (bij naam), en wat het eerst stukgaat.",
+  "Never put passwords, tokens or keys in here — record where they live, not what they are.":
+    "Zet hier nooit wachtwoorden, tokens of sleutels in — leg vast waar ze staan, niet wat ze zijn.",
+  "No secrets here.": "Geen geheimen hier.",
+  "Team or person": "Team of persoon",
+  "Leave empty if it is yours": "Laat leeg als het van jou is",
+  "Repository": "Repository",
+  "Docs": "Docs",
+  "Link to the docs or the runbook": "Link naar de docs of de runbook",
+  "http://localhost:3000": "http://localhost:3000",
+  "https://staging…": "https://staging…",
+  "https://…": "https://…",
+  "https://github.com/…": "https://github.com/…",
+  "Why the code looks the way it does": "Waarom de code eruitziet zoals hij eruitziet",
+  "Architecture decision records: what you chose, what you turned down, and why. Written for whoever opens this code next.":
+    "Architecture decision records: wat je koos, wat je afwees, en waarom. Geschreven voor wie deze code hierna opent.",
+  "Write down the architecture calls as you make them — the library you picked, the pattern you rejected, and why. It is the answer to “why on earth is this like this?” eighteen months from now.":
+    "Leg architectuurkeuzes vast terwijl je ze maakt — de library die je koos, het patroon dat je afwees, en waarom. Het is het antwoord op “waarom is dit in vredesnaam zo?” over anderhalf jaar.",
+  "Record a decision": "Leg een beslissing vast",
+  "Log it": "Vastleggen",
+  "Nothing logged": "Nog niets vastgelegd",
+  "Nothing logged yet": "Nog niets vastgelegd",
+  "What had to be decided?": "Wat moest er besloten worden?",
+  "How do we handle retries on payment capture?": "Hoe gaan we om met retries bij payment capture?",
+  "What did you choose?": "Waar heb je voor gekozen?",
+  "Exponential backoff in the worker, capped at five attempts.":
+    "Exponentiële backoff in de worker, gemaximeerd op vijf pogingen.",
+  "What was done and why": "Wat er is gedaan en waarom",
+  "This is the field that answers “why on earth is this like this?” two years from now.":
+    "Dit is het veld dat over twee jaar “waarom is dit in vredesnaam zo?” beantwoordt.",
+  "The constraint, the trade-off, the thing that made the difference.":
+    "De beperking, de afweging, datgene wat de doorslag gaf.",
+  "What you turned down": "Wat je hebt afgewezen",
+  "Why not": "Waarom niet",
+  "Add an option": "Optie toevoegen",
+  "The gotcha you will have forgotten by next time.": "De valkuil die je de volgende keer vergeten bent.",
+  "Decided on": "Besloten op",
+  "Decided with": "Besloten met",
+  "Who else was in the room": "Wie er verder bij waren",
+  "e.g. Tech lead": "bijv. Tech lead",
+  "Open decisions past this date show up in your alerts.":
+    "Openstaande beslissingen na deze datum verschijnen bij je meldingen.",
+  "Open the log": "Het logboek openen",
+  "Write it down now, while you still remember why.": "Schrijf het nu op, nu je nog weet waarom.",
+  "architecture, database, api": "architectuur, database, api",
+  "Log tech debt": "Tech debt vastleggen",
+  "Log as tech debt": "Vastleggen als tech debt",
+  "From the card “{title}”": "Vanaf de kaart “{title}”",
+  "The shortcut": "De shortcut",
+  "Auth check duplicated in three controllers": "Auth-check gedupliceerd in drie controllers",
+  "The shortcuts you know about, written down before you forget why they are there.":
+    "De shortcuts die je kent, opgeschreven voordat je vergeet waarom ze er zijn.",
+  "Next time you take a shortcut, log it here with what it costs. Future you will want the list.":
+    "De volgende keer dat je een shortcut neemt, leg hem hier vast met wat hij kost. Je toekomstige zelf wil die lijst.",
+  "When you take a shortcut, log it here with what it costs. It turns “the code is a mess” into a list you can actually negotiate time for.":
+    "Als je een shortcut neemt, leg hem hier vast met wat hij kost. Zo wordt “de code is een zooitje” een lijst waarvoor je echt tijd kunt vragen.",
+  "What it costs us": "Wat het ons kost",
+  "Slows every change here · causes the flaky test · the reason onboarding takes a week.":
+    "Vertraagt elke wijziging hier · veroorzaakt de flaky test · de reden dat onboarden een week duurt.",
+  "This is the sentence that wins you the time to fix it.":
+    "Dit is de zin die je de tijd oplevert om het op te lossen.",
+  "The deadline, the workaround, the thing you knew was wrong at the time.":
+    "De deadline, de workaround, dat wat je toen al fout vond.",
+  "Where it lives": "Waar het zit",
+  "File, module or service": "Bestand, module of service",
+  "Effort to fix": "Inspanning om op te lossen",
+  "S — under a day": "S — minder dan een dag",
+  "M — a few days": "M — een paar dagen",
+  "L — a week or more": "L — een week of meer",
+  "Blast radius": "Impactgebied",
+  "High severity": "Hoge ernst",
+  "High-severity debt older than this enters your alerts.":
+    "Tech debt met hoge ernst die ouder is dan dit, verschijnt bij je meldingen.",
+  "Debt alert after (days)": "Debt-melding na (dagen)",
+  "Debt open": "Debt open",
+  "Oldest (days)": "Oudste (dagen)",
+  "How long the worst has been sitting there.": "Hoe lang de ergste er al ligt.",
+  "On the books": "Op de balans",
+  "Open or knowingly accepted.": "Open of bewust geaccepteerd.",
+  "Paid off": "Afbetaald",
+  "Paid off after {age}.": "Afbetaald na {age}.",
+  "All paid off": "Alles afbetaald",
+  "Every shortcut you logged has been dealt with.": "Elke shortcut die je vastlegde is afgehandeld.",
+  "Debt you have actually cleared.": "Tech debt die je daadwerkelijk hebt opgeruimd.",
+  "Still there": "Nog aanwezig",
+  "Fixed": "Opgelost",
+  "Mark fixed": "Markeer als opgelost",
+  "Accepted — living with it": "Geaccepteerd — we leven ermee",
+  "Logged. It now shows its age on the register.": "Vastgelegd. Het toont nu zijn leeftijd op het register.",
+  "Open the register": "Het register openen",
+  "Nothing recorded": "Niets vastgelegd",
+  "auth, legacy, performance": "auth, legacy, performance",
+  "frontend, api, tech-debt": "frontend, api, tech-debt",
+  "New checklist": "Nieuwe checklist",
+  "Edit checklist": "Checklist bewerken",
+  "Save checklist": "Checklist opslaan",
+  "No checklist": "Geen checklist",
+  "No checklists": "Geen checklists",
+  "Before you push": "Voordat je pusht",
+  "The steps you skip when you are tired, and the reference you would otherwise be googling.":
+    "De stappen die je overslaat als je moe bent, en de naslag die je anders zit te googelen.",
+  "A pull request, code review and release checklist are seeded on a fresh workspace. Add them back if you cleared them.":
+    "Een checklist voor pull requests, code review en releases staat klaar in een nieuwe werkruimte. Voeg ze opnieuw toe als je ze hebt gewist.",
+  "Write the one you keep forgetting.": "Schrijf op wat je steeds vergeet.",
+  "Steps": "Stappen",
+  "Add step": "Stap toevoegen",
+  "No steps yet — edit this to add them.": "Nog geen stappen — bewerk dit om ze toe te voegen.",
+  "Written so it is unambiguously done or not done": "Zo geschreven dat het ondubbelzinnig wel of niet gedaan is",
+  "Keep them checkable. “Tested” is an opinion; “test suite green” is not.":
+    "Houd ze afvinkbaar. “Getest” is een mening; “testsuite groen” niet.",
+  "e.g. Before I open the PR": "bijv. Voordat ik de PR open",
+  "Add link": "Link toevoegen",
+  "Edit link": "Link bewerken",
+  "No links yet": "Nog geen links",
+  "The pages you hunt for twice a week — docs, dashboards, repos, the staging login.":
+    "De pagina's die je twee keer per week zoekt — docs, dashboards, repos, de staging-login.",
+  "Park the API reference, the staging dashboard, the design file, the one wiki page you can never find. Links only — nothing is uploaded.":
+    "Parkeer de API-referentie, het staging-dashboard, het designbestand, die ene wikipagina die je nooit kunt vinden. Alleen links — er wordt niets geüpload.",
+  "e.g. Internal API reference": "bijv. Interne API-referentie",
+  "Git rescue": "Git-redding",
+  "For the moments when something has gone wrong and you need it right now":
+    "Voor de momenten waarop iets misging en je het nu meteen nodig hebt",
+  "Undo the last commit, keep the changes": "Laatste commit ongedaan maken, wijzigingen behouden",
+  "Throw away all local changes": "Alle lokale wijzigingen weggooien",
+  "Fix the last commit message": "Laatste commitbericht corrigeren",
+  "Park work without committing": "Werk parkeren zonder te committen",
+  "Bring parked work back": "Geparkeerd werk terughalen",
+  "Undo a commit already pushed": "Een al gepushte commit terugdraaien",
+  "Get out of a rebase gone wrong": "Uit een misgelopen rebase komen",
+  "Find the commit that broke it": "De commit vinden die het brak",
+  "Recover a branch you deleted": "Een verwijderde branch herstellen",
+  "See what you are about to push": "Zien wat je op het punt staat te pushen",
+  "Reset a branch to match origin": "Een branch gelijkzetten met origin",
+  "<b>reset --hard</b> and <b>revert</b> are not the same: revert is safe on anything already pushed, reset is not.":
+    "<b>reset --hard</b> en <b>revert</b> zijn niet hetzelfde: revert is veilig op alles wat al gepusht is, reset niet.",
+  "Reference": "Naslag",
+  "The bits worth having exactly right when someone asks":
+    "De dingen die je precies goed wilt hebben als iemand het vraagt",
+  "HTTP status codes": "HTTP-statuscodes",
+  "What it actually means": "Wat het werkelijk betekent",
+  "It worked.": "Het werkte.",
+  "It worked and something new exists.": "Het werkte en er is iets nieuws.",
+  "It worked; deliberately nothing to return.": "Het werkte; bewust niets terug te geven.",
+  "Permanent redirect. Caches will remember it.": "Permanente redirect. Caches onthouden dit.",
+  "The client sent something malformed.": "De client stuurde iets misvormds.",
+  "Not authenticated — we do not know who you are.": "Niet geauthenticeerd — we weten niet wie je bent.",
+  "Authenticated, but not allowed.": "Geauthenticeerd, maar niet toegestaan.",
+  "No such resource.": "Die resource bestaat niet.",
+  "State clash — duplicate, or edited underneath you.": "Statusconflict — duplicaat, of onder je handen gewijzigd.",
+  "Well-formed but semantically wrong. Validation.": "Goed gevormd maar semantisch fout. Validatie.",
+  "Rate limited. Back off and retry.": "Rate limit bereikt. Wacht even en probeer opnieuw.",
+  "We broke it.": "Wij hebben het gebroken.",
+  "Upstream is down or too slow.": "Upstream ligt eruit of is te traag.",
+  "Down on purpose, or overloaded.": "Bewust uit, of overbelast.",
+  "Semantic versioning": "Semantic versioning",
+  "Bump": "Ophoging",
+  "When": "Wanneer",
+  "Rule": "Regel",
+  "Breaking": "Breekt",
+  "Feature": "Feature",
+  "Fix": "Fix",
+  "You changed or removed something people depend on.":
+    "Je hebt iets gewijzigd of verwijderd waar mensen van afhankelijk zijn.",
+  "You added something; existing use keeps working.": "Je hebt iets toegevoegd; bestaand gebruik blijft werken.",
+  "Behaviour is unchanged apart from the bug.": "Het gedrag is ongewijzigd, afgezien van de bug.",
+  "Conventional commit types": "Conventional commit types",
+  "A new capability for the user": "Een nieuwe mogelijkheid voor de gebruiker",
+  "A bug fix": "Een bugfix",
+  "Same behaviour, different shape": "Zelfde gedrag, andere vorm",
+  "Faster or lighter, same behaviour": "Sneller of lichter, zelfde gedrag",
+  "Tests only": "Alleen tests",
+  "Documentation only": "Alleen documentatie",
+  "Tooling, pipeline or dependencies": "Tooling, pipeline of dependencies",
+  "Everything else that does not touch src": "Al het overige dat src niet raakt",
+  "When to reach for it — and when not to.": "Wanneer je hem inzet — en wanneer niet.",
+  "Jump to the search box": "Spring naar het zoekveld",
+  "New task on the current board": "Nieuwe taak op het huidige bord",
+  "Start a focus session": "Start een focussessie",
+  "Go to Boards": "Ga naar Borden",
+  "Go to Overview": "Ga naar Overzicht",
+  "Show this list": "Toon deze lijst",
+  "Close a dialog or panel": "Sluit een dialoog of paneel",
+  "Context, acceptance criteria, links, error messages…": "Context, acceptatiecriteria, links, foutmeldingen…",
+  "Each section is written as its own readable JSON file — <code>boards.json</code>, <code>snippets.json</code>, and so on.":
+    "Elke sectie wordt weggeschreven als een eigen leesbaar JSON-bestand — <code>boards.json</code>, <code>snippets.json</code>, enzovoort.",
+  "Added to {col} on {board}.": "Toegevoegd aan {col} op {board}.",
+  "A card untouched this long gets a clock on the board. Set 0 to switch it off.":
+    "Een kaart die zo lang onaangeraakt blijft, krijgt een klokje op het bord. Zet op 0 om dit uit te schakelen.",
+  "Stale card after (days)": "Kaart verouderd na (dagen)",
+  "Untick a column to leave it off this board, or remove the row entirely with ×. ":
+    "Vink een kolom uit om hem van dit bord te laten, of verwijder de rij helemaal met ×. ",
+  "Scrum Master Workspace": "Scrum Master Werkruimte",
+  "Sprints & Metrics": "Sprints & metrieken",
+  "Sprints": "Sprints",
+  "Impediments": "Impediments",
+  "Impediment": "Impediment",
+  "Ceremonies": "Events",
+  "Events": "Events",
+  "Event": "Event",
+  "Team": "Team",
+  "Playbook": "Playbook",
+  "Refinement": "Refinement",
+  "Releases": "Releases",
+  "Sprint Board": "Sprintbord",
+  "Daily Scrum": "Daily Scrum",
+  "Daily Scrum log": "Daily Scrum-logboek",
+  "Team Health": "Teamgezondheid",
+  "Team health": "Teamgezondheid",
+  "Welcome to your SM Dashboard": "Welkom bij je SM Dashboard",
+  "Your profile, how this team works, and where the workspace is stored.":
+    "Je profiel, hoe dit team werkt, en waar de werkruimte wordt opgeslagen.",
+  "How this team works": "Hoe dit team werkt",
+  "Where the Sprint stands, and what is in the team's way right now.":
+    "Waar de Sprint staat, en wat het team nu in de weg zit.",
+  "Sprint Goal": "Sprint Goal",
+  "No Sprint Goal yet": "Nog geen Sprint Goal",
+  "add one": "voeg er een toe",
+  "A Sprint without a goal is just a to-do list.": "Een Sprint zonder doel is gewoon een takenlijst.",
+  "The single outcome this Sprint is for.": "Het ene resultaat waar deze Sprint voor bedoeld is.",
+  "One sentence the whole team can repeat from memory.": "Eén zin die het hele team uit het hoofd kan herhalen.",
+  "The goal matters more than the name.": "Het doel is belangrijker dan de naam.",
+  "No Sprint is running": "Er loopt geen Sprint",
+  "No Sprints yet": "Nog geen Sprints",
+  "Plan a Sprint": "Plan een Sprint",
+  "Plan one": "Plan er een",
+  "Plan a Sprint with a goal and dates. From then on the burndown, the day counter and the alerts all key off it.":
+    "Plan een Sprint met een doel en data. Vanaf dan draaien de burndown, de dagteller en de meldingen daarop.",
+  "A Sprint here is the container everything else measures against — the burndown, the velocity, the capacity and the alerts.":
+    "Een Sprint is hier de bak waar al het andere zich aan meet — de burndown, de velocity, de capaciteit en de meldingen.",
+  "Give this Sprint a start and end date and the burndown draws itself.":
+    "Geef deze Sprint een begin- en einddatum en de burndown tekent zichzelf.",
+  "Create Sprint": "Sprint aanmaken",
+  "Edit Sprint": "Sprint bewerken",
+  "Start this Sprint": "Start deze Sprint",
+  "Start {sprint}": "Start {sprint}",
+  "Close Sprint": "Sprint afsluiten",
+  "Close this Sprint": "Sluit deze Sprint af",
+  "Close {sprint}": "{sprint} afsluiten",
+  "Close {sprint} first?": "Eerst {sprint} afsluiten?",
+  "Record what was delivered and decide where the rest goes.":
+    "Leg vast wat er is opgeleverd en bepaal waar de rest heen gaat.",
+  "Sprint closed. Velocity recorded: {v}.": "Sprint afgesloten. Velocity vastgelegd: {v}.",
+  "All Sprints": "Alle Sprints",
+  "Closed": "Afgesloten",
+  "Starts": "Begint",
+  "Ends": "Eindigt",
+  "Days left": "Dagen resterend",
+  "Day": "Dag",
+  "Day {n} of {total} · {left} left": "Dag {n} van {total} · {left} over",
+  "Day {n} · {date}": "Dag {n} · {date}",
+  "No dates set on this Sprint": "Geen data ingesteld voor deze Sprint",
+  "Sprint length (days)": "Sprintlengte (dagen)",
+  "Used to pre-fill the dates on a new Sprint.": "Wordt gebruikt om de data van een nieuwe Sprint voor te vullen.",
+  "Forecast": "Forecast",
+  "Forecast (points)": "Forecast (punten)",
+  "What the team believes it can finish.": "Wat het team denkt te kunnen afronden.",
+  "Leave empty until the team has sized it.": "Laat leeg tot het team het heeft ingeschat.",
+  "Story points": "Story points",
+  "Anything worth remembering about this Sprint.": "Alles wat het onthouden waard is over deze Sprint.",
+  "e.g. Sprint 14": "bijv. Sprint 14",
+  "The {items} should…": "De {items} moeten…",
+  "Move to {sprint}": "Verplaatsen naar {sprint}",
+  "Go back to Refinement": "Terug naar Refinement",
+  "Stay on the board as they are": "Blijven zoals ze zijn op het bord",
+  "Plan the next Sprint first if you want to carry them straight forward.":
+    "Plan eerst de volgende Sprint als je ze direct wilt meenemen.",
+  "unfinished item": "onafgerond item",
+  "unfinished items": "onafgeronde items",
+  "finished item": "afgerond item",
+  "finished items": "afgeronde items",
+  "closed Sprint": "afgesloten Sprint",
+  "closed Sprints": "afgesloten Sprints",
+  "Sprint summary copied — paste it wherever you report.":
+    "Sprintsamenvatting gekopieerd — plak hem waar je rapporteert.",
+  "Copy a plain-text summary": "Kopieer een samenvatting als platte tekst",
+  "Could not copy.": "Kopiëren mislukt.",
+  "— not in a Sprint —": "— niet in een Sprint —",
+  " (active)": " (actief)",
+  "Sprint to pull into": "Sprint om in te trekken",
+  "Not yet pulled into a Sprint.": "Nog niet in een Sprint getrokken.",
+  "Burndown": "Burndown",
+  "Sprint burndown": "Sprint-burndown",
+  "Nothing to burn down": "Niets om af te branden",
+  "Start a Sprint and this fills in on its own.": "Start een Sprint en dit vult zich vanzelf.",
+  "Ideal": "Ideaal",
+  "Actual ({unit} left)": "Werkelijk ({unit} over)",
+  "Working day →": "Werkdag →",
+  "working day": "werkdag",
+  "working days": "werkdagen",
+  "Correct the burndown": "Corrigeer de burndown",
+  "Save burndown": "Burndown opslaan",
+  "Only fill in the days you want to override.": "Vul alleen de dagen in die je wilt overschrijven.",
+  "Velocity": "Velocity",
+  "Velocity per Sprint": "Velocity per Sprint",
+  "No velocity yet": "Nog geen velocity",
+  "Avg velocity": "Gem. velocity",
+  "Average": "Gemiddeld",
+  "Delivered": "Opgeleverd",
+  "Close your first Sprint and a bar appears here. Three Sprints in, the average starts to mean something.":
+    "Sluit je eerste Sprint af en er verschijnt hier een balk. Na drie Sprints begint het gemiddelde iets te betekenen.",
+  "How this Sprint is tracking, and what the last few say about the next one.":
+    "Hoe deze Sprint ervoor staat, en wat de laatste paar zeggen over de volgende.",
+  "Items finished in the last two weeks.": "Items afgerond in de laatste twee weken.",
+  "Person-days": "Mensdagen",
+  "Impediments open": "Impediments open",
+  "In the way": "In de weg",
+  "In the way now": "Nu in de weg",
+  "Nothing in the way": "Niets in de weg",
+  "No impediments raised": "Geen impediments gemeld",
+  "Raise an impediment": "Meld een impediment",
+  "Raise it": "Melden",
+  "Raise this as an impediment": "Meld dit als impediment",
+  "Raise one the moment something stalls the team. The age counter is the point — it is what turns a quiet blocker into a conversation with management.":
+    "Meld er een zodra iets het team ophoudt. De leeftijdsteller is het punt — die maakt van een stille blokkade een gesprek met het management.",
+  "The moment something stalls the team, raise it here. The age counter is what turns a quiet blocker into a real conversation.":
+    "Zodra iets het team ophoudt, meld je het hier. De leeftijdsteller maakt van een stille blokkade een echt gesprek.",
+  "Everything standing between the team and the Sprint Goal. Oldest first, because age is the problem.":
+    "Alles wat tussen het team en het Sprint Goal staat. Oudste eerst, want de leeftijd is het probleem.",
+  "Raised. It now shows its age on the register.": "Gemeld. Het toont nu zijn leeftijd op het register.",
+  "Raised. The card stays flagged until you clear it.": "Gemeld. De kaart blijft gemarkeerd tot je het oplost.",
+  "Impediment raised. It is now counting days.": "Impediment gemeld. De dagen lopen nu.",
+  "Raised by": "Gemeld door",
+  "Raised on": "Gemeld op",
+  "Name it today — the age counter does the rest.": "Benoem het vandaag — de leeftijdsteller doet de rest.",
+  "Stated as the blockage, not the symptom": "Geformuleerd als de blokkade, niet als het symptoom",
+  "What exactly is stalled, and what have you already tried?":
+    "Wat ligt er precies stil, en wat heb je al geprobeerd?",
+  "What is in the way?": "Wat zit er in de weg?",
+  "Who is chasing it?": "Wie zit erachteraan?",
+  "An impediment without a name against it does not move.":
+    "Een impediment zonder naam erbij komt niet in beweging.",
+  "Being worked": "Wordt aan gewerkt",
+  "Escalated": "Geëscaleerd",
+  "Escalated to": "Geëscaleerd naar",
+  "Handed to someone outside the team.": "Overgedragen aan iemand buiten het team.",
+  "Manager, other team, vendor…": "Manager, ander team, leverancier…",
+  "Resolved": "Opgelost",
+  "Resolved on": "Opgelost op",
+  "Mark resolved": "Markeer als opgelost",
+  "Clear this impediment": "Los dit impediment op",
+  "Cleared": "Opgelost",
+  "Cleared after {age}.": "Opgelost na {age}.",
+  "How it was cleared": "Hoe het is opgelost",
+  "How was it cleared?": "Hoe is het opgelost?",
+  "What actually unblocked it?": "Wat heeft het daadwerkelijk vlotgetrokken?",
+  "Worth writing down — the same wall tends to come back.":
+    "Het opschrijven waard — dezelfde muur komt meestal terug.",
+  "Still in the way": "Nog steeds in de weg",
+  "Aging": "Veroudering",
+  "Avg days to clear": "Gem. dagen tot oplossing",
+  "Across every status that is not resolved.": "Over alle statussen die niet opgelost zijn.",
+  "Every impediment on the register has been cleared.": "Elk impediment op het register is opgelost.",
+  "Impediment alert after (days)": "Impediment-melding na (dagen)",
+  "Older open impediments turn red and enter your alerts.":
+    "Oudere open impediments worden rood en verschijnen bij je meldingen.",
+  "Nothing open": "Niets open",
+  "open impediment": "open impediment",
+  "open impediments": "open impediments",
+  "resolved impediment": "opgelost impediment",
+  "resolved impediments": "opgeloste impediments",
+  "dependency, environment, staffing": "afhankelijkheid, omgeving, bezetting",
+  "Then raise it as an impediment": "Meld het daarna als impediment",
+  "The five events and their timeboxes": "De vijf events en hun timeboxes",
+  "The five events, their timeboxes, and the agenda you facilitate from.":
+    "De vijf events, hun timeboxes, en de agenda waarvandaan je faciliteert.",
+  "The five Scrum events are seeded on a fresh workspace. Add one back if you removed it.":
+    "De vijf Scrum-events staan klaar in een nieuwe werkruimte. Voeg er een terug als je hem hebt verwijderd.",
+  "No events defined": "Geen events ingesteld",
+  "Add an event": "Voeg een event toe",
+  "Add event": "Event toevoegen",
+  "Edit event": "Event bewerken",
+  "Timebox": "Timebox",
+  "Timebox (minutes)": "Timebox (minuten)",
+  "Start the timebox": "Start de timebox",
+  "Start a 15-minute timebox": "Start een timebox van 15 minuten",
+  "15-minute timebox started.": "Timebox van 15 minuten gestart.",
+  "Timebox started: {len}.": "Timebox gestart: {len}.",
+  "Timebox for {event} is up.": "Timebox voor {event} is om.",
+  "this event": "dit event",
+  "Agenda": "Agenda",
+  "Agenda point": "Agendapunt",
+  "Add agenda point": "Agendapunt toevoegen",
+  "No agenda yet — edit this event to add one.": "Nog geen agenda — bewerk dit event om er een toe te voegen.",
+  "Tick these off while you facilitate — Reset clears them for the next run.":
+    "Vink deze af terwijl je faciliteert — Reset maakt ze leeg voor de volgende keer.",
+  "Untick every agenda point": "Vink alle agendapunten uit",
+  "Agenda reset for the next {event}.": "Agenda gereset voor de volgende {event}.",
+  "Who attends": "Wie erbij is",
+  "Whole team, PO, stakeholders…": "Hele team, PO, stakeholders…",
+  "Why it exists": "Waarom het bestaat",
+  "The outcome, not the ritual.": "Het resultaat, niet het ritueel.",
+  "How often": "Hoe vaak",
+  "Every working day": "Elke werkdag",
+  "Start of each Sprint": "Begin van elke Sprint",
+  "End of each Sprint": "Einde van elke Sprint",
+  "When needed": "Wanneer nodig",
+  "Weekly": "Wekelijks",
+  "Next occurrence": "Eerstvolgende keer",
+  "No event scheduled for today.": "Geen event gepland voor vandaag.",
+  "e.g. Sprint Planning": "bijv. Sprint Planning",
+  "Held and recorded.": "Gehouden en vastgelegd.",
+  "Run or continue today's standup": "Start of vervolg de standup van vandaag",
+  "Round the team": "Het team rond",
+  "Since yesterday": "Sinds gisteren",
+  "Today:": "Vandaag:",
+  "Blocked by": "Geblokkeerd door",
+  "Blocked by…": "Geblokkeerd door…",
+  "No blockers": "Geen blokkades",
+  "Anything typed under “Blocked by” can be turned into a real impediment afterwards.":
+    "Alles wat je onder “Geblokkeerd door” typt, kun je daarna omzetten in een echt impediment.",
+  "Record the Daily Scrum and you get a searchable history: who was there, what was blocked, and what you promised to take offline.":
+    "Leg de Daily Scrum vast en je krijgt een doorzoekbare historie: wie erbij was, wat geblokkeerd was, en wat je hebt beloofd offline op te pakken.",
+  "No standups recorded": "Geen standups vastgelegd",
+  "Standups logged": "Standups vastgelegd",
+  "Facilitator": "Facilitator",
+  "Who runs it today": "Wie hem vandaag leidt",
+  "Usually you": "Meestal jij",
+  "Parking lot": "Parkeerplaats",
+  "Park a topic": "Parkeer een onderwerp",
+  "Take this offline with…": "Dit offline oppakken met…",
+  "The deep-dives that would otherwise eat the fifteen minutes.":
+    "De verdiepingen die anders de vijftien minuten opeten.",
+  "parked topic": "geparkeerd onderwerp",
+  "parked topics": "geparkeerde onderwerpen",
+  "Nothing waiting": "Niets in de wacht",
+  "Anyone missing today": "Wie er vandaag ontbreekt",
+  "From the Daily Scrum of {date}": "Van de Daily Scrum van {date}",
+  "Team members": "Teamleden",
+  "Team name": "Teamnaam",
+  "Members": "Leden",
+  "Member": "Lid",
+  "Person": "Persoon",
+  "Add a team member": "Voeg een teamlid toe",
+  "Add member": "Lid toevoegen",
+  "Add person": "Persoon toevoegen",
+  "Edit member": "Lid bewerken",
+  "No team yet": "Nog geen team",
+  "Add everyone on the team. Their availability feeds the Sprint capacity, their absences show up in the Daily Scrum, and the standup rotation picks the next facilitator for you.":
+    "Voeg iedereen uit het team toe. Hun beschikbaarheid voedt de Sprintcapaciteit, hun afwezigheid verschijnt in de Daily Scrum, en de standuprotatie kiest de volgende facilitator voor je.",
+  "Who is on the team, who is available, and how everybody is actually doing.":
+    "Wie er in het team zit, wie beschikbaar is, en hoe het echt met iedereen gaat.",
+  "Availability": "Beschikbaarheid",
+  "Availability (%)": "Beschikbaarheid (%)",
+  "80 for someone who is four days a week on this team.": "80 voor iemand die vier dagen per week in dit team zit.",
+  "Role": "Rol",
+  "Developer, Tester, Product Owner…": "Developer, Tester, Product Owner…",
+  "How they are known in the team": "Hoe ze in het team bekendstaan",
+  "Email or handle": "E-mail of handle",
+  "Anything worth remembering about how they work best.":
+    "Alles wat het onthouden waard is over hoe ze het beste werken.",
+  "Planned absence": "Geplande afwezigheid",
+  "Add absence": "Afwezigheid toevoegen",
+  "Absent": "Afwezig",
+  "Away today": "Vandaag afwezig",
+  "Covered": "Gedekt",
+  "From": "Van",
+  "Until": "Tot",
+  "Reason": "Reden",
+  "Holiday, training, other team…": "Vakantie, training, ander team…",
+  "Deducted from the Sprint capacity, and shown on the day itself.":
+    "Wordt afgetrokken van de Sprintcapaciteit, en getoond op de dag zelf.",
+  "Team health check": "Teamgezondheidscheck",
+  "Health checks": "Gezondheidschecks",
+  "Health check · {date}": "Gezondheidscheck · {date}",
+  "No health checks yet": "Nog geen gezondheidschecks",
+  "No health check taken yet.": "Nog geen gezondheidscheck gedaan.",
+  "How is everyone doing?": "Hoe gaat het met iedereen?",
+  "Mood (1–5)": "Stemming (1–5)",
+  "1 · bad": "1 · slecht",
+  "3 · ok": "3 · oké",
+  "5 · great": "5 · geweldig",
+  "Low scores": "Lage scores",
+  "Save check": "Check opslaan",
+  "One number each, out of five. Thirty seconds, and the trend is worth a lot.":
+    "Eén cijfer per persoon, uit vijf. Dertig seconden, en de trend is veel waard.",
+  "Ask everyone for a number out of five at the end of a Sprint. Two or three checks in, the trend tells you more than the numbers do.":
+    "Vraag iedereen aan het eind van een Sprint om een cijfer uit vijf. Na twee of drie checks zegt de trend meer dan de cijfers.",
+  "Comment": "Opmerking",
+  "Context": "Context",
+  "Sessions": "Sessies",
+  "The agreements this team lives by, and the reference you would otherwise be googling mid-meeting.":
+    "De afspraken waar dit team naar leeft, en de naslag die je anders midden in een meeting zit te googelen.",
+  "Agreements": "Afspraken",
+  "Agreement": "Afspraak",
+  "New agreement": "Nieuwe afspraak",
+  "Edit agreement": "Afspraak bewerken",
+  "Save agreement": "Afspraak opslaan",
+  "No agreements": "Geen afspraken",
+  "Definition of Done": "Definition of Done",
+  "Definition of Ready": "Definition of Ready",
+  "The Definition of Done, the Definition of Ready and how you work together. These are seeded on a fresh workspace — add them back if you cleared them.":
+    "De Definition of Done, de Definition of Ready en hoe jullie samenwerken. Deze staan klaar in een nieuwe werkruimte — voeg ze terug als je ze hebt gewist.",
+  "The Definition of Ready is the one the Refinement queue checks against.":
+    "De Definition of Ready is degene waar de Refinement-wachtrij tegen toetst.",
+  "Nothing agreed yet — edit this to add the criteria.":
+    "Nog niets afgesproken — bewerk dit om de criteria toe te voegen.",
+  "Criteria": "Criteria",
+  "criterion": "criterium",
+  "criteria": "criteria",
+  "Add criterion": "Criterium toevoegen",
+  "What has to be true for this to be Done?": "Wat moet er waar zijn voordat dit Done is?",
+  "Keep them testable. “Tested” is an argument; “automated tests green” is not.":
+    "Houd ze toetsbaar. “Getest” is een discussie; “geautomatiseerde tests groen” niet.",
+  "Written so it is unambiguously true or false": "Zo geschreven dat het ondubbelzinnig waar of onwaar is",
+  "Agree what Done means before the next Review.": "Spreek af wat Done betekent vóór de volgende Review.",
+  "e.g. Definition of Done": "bijv. Definition of Done",
+  "Not written yet": "Nog niet opgeschreven",
+  "Scrum quick reference": "Scrum-naslag",
+  "The bits that are worth having exactly right when someone asks":
+    "De dingen die je precies goed wilt hebben als iemand het vraagt",
+  "The three accountabilities": "De drie accountabilities",
+  "Accountability": "Accountability",
+  "What they are on the hook for": "Waar zij voor aan de lat staan",
+  "Maximises the value of the product. Owns the Product Backlog and its order.":
+    "Maximaliseert de waarde van het product. Eigenaar van de Product Backlog en de volgorde daarvan.",
+  "Accountable for the team's effectiveness and for Scrum being understood and enacted.":
+    "Verantwoordelijk voor de effectiviteit van het team en ervoor dat Scrum begrepen en toegepast wordt.",
+  "Developers": "Developers",
+  "Everyone doing the work. Accountable for a usable Increment every Sprint.":
+    "Iedereen die het werk doet. Verantwoordelijk voor een bruikbaar Increment elke Sprint.",
+  "Purpose": "Doel",
+  "The three artifacts and their commitments": "De drie artifacts en hun commitments",
+  "Artifact": "Artifact",
+  "Commitment": "Commitment",
+  "What it is": "Wat het is",
+  "The five values": "De vijf waarden",
+  "Facilitation techniques": "Facilitatietechnieken",
+  "Retrospective formats": "Retrospective-formats",
+  "Vary it. The ninth Start/Stop/Continue in a row stops producing anything.":
+    "Wissel af. De negende Start/Stop/Continue op rij levert niets meer op.",
+  "Vary it — the Playbook has {n} to pick from.": "Wissel af — het Playbook heeft er {n} om uit te kiezen.",
+  "Last format": "Laatste format",
+  "Format used": "Gebruikt format",
+  "— not recorded —": "— niet vastgelegd —",
+  "— not linked —": "— niet gekoppeld —",
+  "— nobody —": "— niemand —",
+  "The queue waiting for Sprint Planning. Drag to re-rank; check each one against the Definition of Ready.":
+    "De wachtrij voor Sprint Planning. Sleep om te herschikken; toets elk item aan de Definition of Ready.",
+  "Park work here before it is ready for a Sprint. Size it, walk it through the Definition of Ready, then pull it into the Sprint at Planning.":
+    "Parkeer werk hier voordat het klaar is voor een Sprint. Schat het in, loop de Definition of Ready langs, en trek het bij Planning de Sprint in.",
+  "Refinement item": "Refinement-item",
+  "Refinement items": "Refinement-items",
+  "New refinement item": "Nieuw refinement-item",
+  "In the queue": "In de wachtrij",
+  "Waiting in Refinement": "Wachtend in Refinement",
+  "Park it here until the team agrees it is ready.": "Parkeer het hier tot het team het ready vindt.",
+  "Ready": "Ready",
+  "Not ready yet": "Nog niet ready",
+  "Not sized": "Niet ingeschat",
+  "Not estimated": "Niet ingeschat",
+  "Points queued": "Punten in de wachtrij",
+  "Pull it in anyway": "Toch binnenhalen",
+  "Go to the Sprint Board": "Ga naar het Sprintbord",
+  "Details and acceptance criteria": "Details en acceptatiecriteria",
+  "Written from the user's point of view": "Geschreven vanuit het perspectief van de gebruiker",
+  "spike, tech-debt, must-have": "spike, tech-debt, must-have",
+  "Release or date": "Release of datum",
+  "New release": "Nieuwe release",
+  "Add release": "Release toevoegen",
+  "Edit release": "Release bewerken",
+  "No releases yet": "Nog geen releases",
+  "Add the dates outside the Sprint that the team is steering towards — a release, an audit, a hard external deadline.":
+    "Voeg de data buiten de Sprint toe waar het team naartoe stuurt — een release, een audit, een harde externe deadline.",
+  "The dates outside the Sprint that the team is working towards, grouped by quarter.":
+    "De data buiten de Sprint waar het team naartoe werkt, gegroepeerd per kwartaal.",
+  "e.g. Public beta": "bijv. Publieke bèta",
+  "e.g. after the release weekend": "bijv. na het releaseweekend",
+  "Open retrospectives": "Open retrospectives",
+  "Actions open": "Acties open",
+  "Actions completed": "Acties afgerond",
+  "Retro actions open": "Retro-acties open",
+  "Retro actions still open — the ones that quietly disappear":
+    "Retro-acties die nog openstaan — die stilletjes verdwijnen",
+  "Across every retro on record.": "Over alle vastgelegde retro's.",
+  "Every action from your retrospectives has been ticked off. That is rarer than it sounds.":
+    "Elke actie uit je retrospectives is afgevinkt. Dat is zeldzamer dan het klinkt.",
+  "Improvements not yet made": "Verbeteringen die nog niet zijn doorgevoerd",
+  "One concrete change": "Eén concrete verandering",
+  "At most two. An action without an owner is a wish.": "Hooguit twee. Een actie zonder eigenaar is een wens.",
+  "Nothing outstanding": "Niets openstaand",
+  "Where the Sprint Backlog actually lives.": "Waar de Sprint Backlog echt woont.",
+  "Create the board. It starts with Backlog, To Do, In Progress, Review and Done — rename, recolour, WIP-limit or delete any of them afterwards.":
+    "Maak het bord aan. Het begint met Backlog, To Do, In Progress, Review en Done — je kunt ze daarna hernoemen, verkleuren, een WIP-limiet geven of verwijderen.",
+  "Create your first board. You can keep as many as you like — one per team, plus a private one for your own Scrum Master work.":
+    "Maak je eerste bord aan. Je kunt er zoveel houden als je wilt — één per team, plus een privébord voor je eigen Scrum Master-werk.",
+  "Cards here count towards the Sprint": "Kaarten hier tellen mee voor de Sprint",
+  "Leave this off for your own private board, so your personal to-dos stay out of the burndown, the velocity and the cycle time.":
+    "Laat dit uit voor je eigen privébord, zodat je persoonlijke to-do's buiten de burndown, de velocity en de doorlooptijd blijven.",
+  "Private": "Privé",
+  "New task on the board": "Nieuwe taak op het bord",
+  "Added to {col} in {sprint}.": "Toegevoegd aan {col} in {sprint}.",
+  "Task created in {col} for {sprint}.": "Taak aangemaakt in {col} voor {sprint}.",
+  "e.g. Team Honeycomb, or My own work": "bijv. Team Honeycomb, of Mijn eigen werk",
+  "Change that": "Verander dat",
+  "Detail": "Detail",
+  "Why?": "Waarom?",
+  "What was decided, by whom, and why": "Wat er is besloten, door wie, en waarom",
+  "Record the choices the team makes together — the ones that get re-litigated three months later because nobody wrote down why.":
+    "Leg de keuzes vast die het team samen maakt — die drie maanden later opnieuw ter discussie staan omdat niemand het waarom opschreef.",
+  "Each section is written as its own readable JSON file — <code>sprints.json</code>, <code>impediments.json</code>, and so on.":
+    "Elke sectie wordt weggeschreven als een eigen leesbaar JSON-bestand — <code>sprints.json</code>, <code>impediments.json</code>, enzovoort.",
+  "Notes &amp; Reminders": "Notities &amp; herinneringen",
+  "Add cards and this fills in automatically.": "Voeg kaarten toe en dit vult zich vanzelf.",
+};
+
+
+
+/* ============================================================================
    19. BOOT
    ========================================================================= */
 async function start() {
@@ -5557,6 +6880,7 @@ async function start() {
 }
 
 async function boot() {
+  applyLang();
   let cfg = null;
   try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (e) { /* ignore */ }
 
