@@ -610,6 +610,8 @@ table.tbl tbody tr:hover{background:var(--surface-2)}
 .wiz-hero{text-align:center;padding:30px 26px 6px}
 .wiz-hero h2{font-size:22px;font-weight:800;letter-spacing:-.03em;margin-top:16px}
 .wiz-hero p{font-size:13.5px;color:var(--text-2);margin-top:8px;line-height:1.6}
+/* The overlay covers the top-bar switch, so the wizard carries its own. */
+.wiz-lang{display:flex;justify-content:center;padding:0 26px 22px}
 .choice{
   display:flex;gap:14px;align-items:flex-start;width:100%;text-align:left;
   border:1.5px solid var(--border);border-radius:var(--r-lg);
@@ -831,8 +833,31 @@ function _tp(s, vars) {
   return String(_t(s)).replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m));
 }
 
+/**
+ * Display label for starter content - the text seed*() and default*() wrote
+ * into the workspace on first run (checklist steps, board columns, ceremony
+ * agendas, the Definition of Done).
+ *
+ * That text is DATA: it stays English in storage, in the folder JSON and in
+ * the export, so switching language never rewrites a saved record. Only what
+ * is on screen changes.
+ *
+ * Looked up ONLY under a "seed|" key, with no fallback to the plain key, so a
+ * note the user titles "Settings" can never come back as "Instellingen".
+ * Anything the user typed themselves passes through untouched.
+ */
+function _sd(s) {
+  if (LANG !== "nl" || typeof s !== "string" || !s) return s;
+  const k = "seed|" + s;
+  return Object.prototype.hasOwnProperty.call(NL, k) ? NL[k] : s;
+}
+
 /** Console helper: which wrapped strings still have no Dutch. */
 window.__i18nMissing = () => Array.from(_missing).sort();
+
+/* Dates are display, never storage: the stored value stays an ISO string and
+   only the rendering follows the chosen language. */
+function dateLocale() { return LANG === "nl" ? "nl-NL" : "en-GB"; }
 
 /* Display labels for stored enum values. The VALUE stays an English identifier
    in the data and in CSS class names; only what the user reads is translated. */
@@ -857,11 +882,14 @@ function vlabel(domain, value) {
 function applyLang() {
   document.documentElement.lang = LANG;
   const set = (sel, text) => { const el = $(sel); if (el) el.textContent = text; };
-  document.title = LANG === "nl"
-    ? "PO Dashboard — Product Owner Werkruimte van Tonny Sluijs"
-    : "PO Dashboard — Product Owner Workspace by Tonny Sluijs";
+  document.title = "PO Dashboard — " + _t("Product Owner Workspace") + " " + _t("by Tonny Sluijs");
   set(".brandinfo .sub", _t("Product Owner Workspace"));
   set(".brand-sub", _t("Workspace by Tonny Sluijs."));
+  /* The wizard path never reaches render(), so the static greeting would stay
+     English until onboarding finished. renderTopbar() replaces both with the
+     personalised greeting once state is loaded. */
+  set("#greet", _t("Welcome"));
+  set("#greetSub", _t("Let's build something amazing today."));
   const search = $("#search");
   if (search) search.placeholder = _t("Search everything…");
   const bell = $("#bellBtn"); if (bell) bell.title = _t("Alerts");
@@ -893,24 +921,24 @@ function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
   if (isNaN(d)) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: "numeric" });
 }
 function fmtShort(iso) {
   if (!iso) return "";
   const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
   if (isNaN(d)) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
 }
 function relTime(iso) {
   if (!iso) return "";
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.round(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return m + "m ago";
+  if (m < 1) return _t("just now");
+  if (m < 60) return _tp("{n}m ago", { n: m });
   const h = Math.round(m / 60);
-  if (h < 24) return h + "h ago";
+  if (h < 24) return _tp("{n}h ago", { n: h });
   const d = Math.round(h / 24);
-  if (d < 31) return d + "d ago";
+  if (d < 31) return _tp("{n}d ago", { n: d });
   return fmtDate(iso);
 }
 /** Days until a YYYY-MM-DD date. Negative = overdue. */
@@ -1141,7 +1169,7 @@ const Store = {
       } catch (e) {
         if (e && (e.name === "NotFoundError" || e.name === "NotAllowedError")) return null;
         if (e instanceof SyntaxError) {
-          toast(key + ".json is not valid JSON — it was skipped, not overwritten.", "err", 8000);
+          toast(_tp("{file}.json is not valid JSON — it was skipped, not overwritten.", { file: key }), "err", 8000);
           return null;
         }
         return null;
@@ -1177,8 +1205,8 @@ const Store = {
   },
 
   location() {
-    if (this.mode === "folder") return this.folderName ? "Folder: " + this.folderName : "Folder";
-    return "This browser (localStorage)";
+    if (this.mode === "folder") return this.folderName ? _tp("Folder: {name}", { name: this.folderName }) : _t("Folder");
+    return _t("This browser (localStorage)");
   },
 };
 
@@ -1213,7 +1241,7 @@ async function flush() {
   } catch (e) {
     keys.forEach(k => dirty.add(k));
     setSaveState("error");
-    toast(_tp("Could not save: {msg}", { msg: (e && e.message ? e.message : e) }), "err", 7000);
+    toast(_tp("Could not save: {msg}", { msg: _t(e && e.message ? e.message : String(e)) }), "err", 7000);
   } finally {
     saving = false;
     if (dirty.size) scheduleSave();
@@ -1228,9 +1256,9 @@ function setSaveState(kind) {
   const el = $("#saveState");
   if (!el) return;
   const map = {
-    saving: [ic("save", 13), "Saving…", "var(--text-3)"],
-    saved: [ic("checkCircle", 13), "Saved", "var(--green)"],
-    error: [ic("alert", 13), "Not saved", "var(--red)"],
+    saving: [ic("save", 13), _t("Saving…"), "var(--text-3)"],
+    saved: [ic("checkCircle", 13), _t("Saved"), "var(--green)"],
+    error: [ic("alert", 13), _t("Not saved"), "var(--red)"],
   };
   const m = map[kind] || map.saved;
   el.innerHTML = m[0] + "<span>" + esc(_t(m[1])) + "</span>";
@@ -1452,7 +1480,7 @@ function repeaterHTML(f, value) {
       '<span class="rep-h" style="flex:0 0 30px"></span></div>'
     : "";
   return '<div data-rep="' + f.name + '" data-subs=\'' + esc(JSON.stringify(f.sub)) + "'" +
-    ' data-check-key="' + esc(f.checkKey || "") + '" data-check-title="' + esc(_t(f.checkTitle || "Done")) + '"' +
+    ' data-check-key="' + esc(f.checkKey || "") + '" data-check-title="' + esc(f.checkTitle || "Done") + '"' +
     ' data-check-default="' + (f.checkDefault ? "1" : "") + '">' +
     headers +
     '<div class="rep-rows">' + rows + "</div>" +
@@ -1579,6 +1607,11 @@ function openWizard() {
           '<div class="notice info">' + ic("info", 16) +
           "<span>" + esc(_t("Your workspace starts completely empty — no sample tasks, no placeholder people.")) + "</span></div>" +
         "</div>" +
+        '<div class="wiz-lang">' +
+          '<div class="seg" title="Language / Taal">' +
+            '<button data-action="set-lang" data-lang="en" class="' + (LANG === "en" ? "on" : "") + '">EN</button>' +
+            '<button data-action="set-lang" data-lang="nl" class="' + (LANG === "nl" ? "on" : "") + '">NL</button>' +
+          "</div></div>" +
       "</div></div>";
 }
 
@@ -1733,22 +1766,22 @@ function alertItems() {
   const board = activeBoard();
   if (board) {
     board.tasks.filter(t => isOverdue(t, board)).forEach(t => {
-      out.push({ kind: "task", icon: "alert", text: "Overdue task: " + t.title, when: fmtShort(t.due), view: "taskboard" });
+      out.push({ kind: "task", icon: "alert", text: _tp("Overdue task: {title}", { title: t.title }), when: fmtShort(t.due), view: "taskboard" });
     });
   }
   S.notes.items.forEach(n => {
     if (n.remindAt && daysUntil(n.remindAt) <= 0) {
-      out.push({ kind: "note", icon: "bell", text: "Reminder: " + n.text.slice(0, 70), when: fmtShort(n.remindAt), view: "notes" });
+      out.push({ kind: "note", icon: "bell", text: _tp("Reminder: {text}", { text: n.text.slice(0, 70) }), when: fmtShort(n.remindAt), view: "notes" });
     }
   });
   S.roadmap.items.forEach(m => {
     if (m.date && m.status !== "done" && daysUntil(m.date) < 0) {
-      out.push({ kind: "milestone", icon: "flag", text: "Milestone past due: " + m.title, when: fmtShort(m.date), view: "roadmap" });
+      out.push({ kind: "milestone", icon: "flag", text: _tp("Milestone past due: {title}", { title: m.title }), when: fmtShort(m.date), view: "roadmap" });
     }
   });
   S.decisions.items.forEach(d => {
     if (d.status === "pending" && d.reviewBy && daysUntil(d.reviewBy) < 0) {
-      out.push({ kind: "decision", icon: "scale", text: "Decision still pending: " + d.problem.slice(0, 60), when: fmtShort(d.reviewBy), view: "decisions" });
+      out.push({ kind: "decision", icon: "scale", text: _tp("Decision still pending: {problem}", { problem: d.problem.slice(0, 60) }), when: fmtShort(d.reviewBy), view: "decisions" });
     }
   });
   return out;
@@ -1798,7 +1831,7 @@ function donut(segments, centreValue, centreLabel) {
   }).join("");
   const track = '<circle cx="18" cy="18" r="15.915" fill="none" stroke="var(--surface-3)" stroke-width="3.2"></circle>';
   return '<div class="donut-wrap"><div class="donut"><svg viewBox="0 0 36 36">' + track + rings + "</svg>" +
-    '<div class="mid"><b>' + esc(centreValue) + "</b><span>" + esc(centreLabel) + "</span></div></div></div>";
+    '<div class="mid"><b>' + esc(centreValue) + "</b><span>" + esc(_t(centreLabel)) + "</span></div></div></div>";
 }
 
 /* ============================================================================
@@ -1840,7 +1873,7 @@ function kanbanHTML(board, compact) {
     const over = col.wip && all > col.wip;
     return `<div class="kcol ${compact ? "compact" : ""}" data-accent="${esc(col.accent || "slate")}" data-col-id="${col.id}" data-drop-col="${col.id}">
         <div class="kcol-head">
-          <span class="name grow truncate">${esc(col.name)}</span>
+          <span class="name grow truncate">${esc(_sd(col.name))}</span>
           ${col.wip ? `<span class="mini bold ${over ? "over" : "dim"}" title="${_t("Work-in-progress limit")}">${all}/${col.wip}</span>` : ""}
           <span class="n">${all}</span>
         </div>
@@ -2115,9 +2148,9 @@ VIEWS.decisions = function () {
   ${pageHead("Decision Log", "The record of what was decided, by whom, and — most importantly — why.", `
     <select class="sel sel-auto" data-action="set-decision-status">
       ${["all", "proposed", "pending", "approved", "rejected", "superseded"].map(s =>
-        `<option value="${s}" ${ui.decisionStatus === s ? "selected" : ""}>${s === "all" ? "All status" : s[0].toUpperCase() + s.slice(1)} (${counts[s] || 0})</option>`).join("")}
+        `<option value="${s}" ${ui.decisionStatus === s ? "selected" : ""}>${s === "all" ? _t("All status") : vlabel("status", s)} (${counts[s] || 0})</option>`).join("")}
     </select>
-    <button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}New Decision</button>`)}
+    <button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}${_t("New Decision")}</button>`)}
 
   <div class="card">
     ${list.length ? decisionTable(list, false)
@@ -2125,7 +2158,7 @@ VIEWS.decisions = function () {
         ? emptyState("search", "No decisions match", "Try a different filter or clear the search box.")
         : emptyState("scale", "Nothing decided yet",
           "Log a decision the moment you make it: the problem, the options you turned down, the reason you chose this one. Six months from now that context is the whole point.",
-          `<button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}Log your first decision</button>`)}
+          `<button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}${_t("Log your first decision")}</button>`)}
   </div>`;
 };
 
@@ -2142,7 +2175,7 @@ VIEWS.roadmap = function () {
 
   return `
   ${pageHead("Roadmap", "Milestones and releases, grouped by quarter.", `
-    <button class="btn btn-primary" data-action="new-milestone">${ic("plus", 14)}New Milestone</button>`)}
+    <button class="btn btn-primary" data-action="new-milestone">${ic("plus", 14)}${_t("New Milestone")}</button>`)}
   ${keys.length ? keys.map(k => `
     <div class="card" style="margin-bottom:16px">
       <div class="card-head" style="margin-bottom:12px">
@@ -2213,7 +2246,7 @@ VIEWS.backlog = function () {
       </div>`).join("")}</div>`
       : emptyState("layers", "Backlog is empty",
         "Park ideas and requests here with a value and effort estimate, then promote the best ones onto the board.",
-        `<button class="btn btn-primary" data-action="new-backlog">${ic("plus", 14)}Add your first item</button>`)}
+        `<button class="btn btn-primary" data-action="new-backlog">${ic("plus", 14)}${_t("Add your first item")}</button>`)}
   </div>`;
 };
 
@@ -2226,7 +2259,7 @@ VIEWS.notes = function () {
 
   return `
   ${pageHead("Notes & Reminders", "Quick thoughts, follow-ups and things you must not forget.", `
-    <button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}New Note</button>`)}
+    <button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}${_t("New Note")}</button>`)}
   ${list.length ? `<div class="grid-3">${list.map(n => {
     const d = n.remindAt ? daysUntil(n.remindAt) : null;
     const due = d !== null && d <= 0;
@@ -2245,7 +2278,7 @@ VIEWS.notes = function () {
   }).join("")}</div>`
     : `<div class="card">${emptyState("note", "No notes yet",
       "Jot down anything you would otherwise lose in a chat thread. Add a reminder date and it will show up in your alerts.",
-      `<button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}Write your first note</button>`)}</div>`}`;
+      `<button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}${_t("Write your first note")}</button>`)}</div>`}`;
 };
 
 /* --------------------------------------------------------------- DOCUMENTS */
@@ -2293,7 +2326,7 @@ VIEWS.goals = function () {
     return `<div class="card">
       <div class="card-head" style="margin-bottom:12px">
         <div class="card-title"><span class="tile-icon" style="background:var(--purple-weak);color:var(--purple)">${ic("target", 17, 2.2)}</span>
-          <div><h3>${esc(g.title)}</h3><span class="sub">${esc(g.period || "No period set")}</span></div></div>
+          <div><h3>${esc(g.title)}</h3><span class="sub">${esc(g.period || _t("No period set"))}</span></div></div>
         <div class="act">
           <button data-action="edit-goal" data-id="${g.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
           <button class="del" data-action="delete-goal" data-id="${g.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
@@ -2322,14 +2355,14 @@ VIEWS.retrospective = function () {
 
   return `
   ${pageHead("Retrospective", "What went well, what did not, and what you are actually going to do about it.", `
-    <button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}New Session</button>`)}
+    <button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}${_t("New Session")}</button>`)}
   ${list.length ? list.map(r => {
     const actions = r.actions || [];
     const doneCount = actions.filter(a => a.done).length;
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-head">
         <div class="card-title"><span class="tile-icon" style="background:var(--blue-weak);color:var(--blue)">${ic("history", 17, 2.2)}</span>
-          <div><h3>${esc(r.title)}</h3><span class="sub">${esc(fmtDate(r.date))}${actions.length ? " · " + doneCount + "/" + actions.length + " actions done" : ""}</span></div></div>
+          <div><h3>${esc(r.title)}</h3><span class="sub">${esc(fmtDate(r.date))}${actions.length ? " · " + _tp("{done}/{total} actions done", { done: doneCount, total: actions.length }) : ""}</span></div></div>
         <div class="act">
           <button data-action="edit-retro" data-id="${r.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
           <button class="del" data-action="delete-retro" data-id="${r.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
@@ -2361,7 +2394,7 @@ VIEWS.retrospective = function () {
   }).join("")
     : `<div class="card">${emptyState("history", "No retrospectives yet",
       "Record each session so patterns become visible over time — and so action items do not quietly disappear.",
-      `<button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}Start your first retro</button>`)}</div>`}`;
+      `<button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}${_t("Start your first retro")}</button>`)}</div>`}`;
 };
 
 /* ---------------------------------------------------------------- SETTINGS */
@@ -2506,7 +2539,7 @@ function taskFields(board) {
   return [
     { name: "title", label: "Task", type: "text", required: true, placeholder: "What needs to happen?" },
     { name: "description", label: "Details", type: "textarea", rows: 3, placeholder: "Context, acceptance criteria, links…" },
-    { name: "columnId", label: "Column", type: "select", half: true, full: false, raw: true, options: board.columns.map(c => ({ value: c.id, label: c.name })) },
+    { name: "columnId", label: "Column", type: "select", half: true, full: false, raw: true, options: board.columns.map(c => ({ value: c.id, label: _sd(c.name) })) },
     { name: "priority", label: "Priority", type: "select", half: true, full: false, options: PRIORITIES },
     { name: "assignee", label: "Assignee", type: "text", half: true, full: false, placeholder: "Name — becomes an initials badge" },
     { name: "due", label: "Due date", type: "date", half: true, full: false },
@@ -2625,8 +2658,8 @@ function wireBoardForm(form, initialDoneId) {
     });
     const wanted = select.value || preferred;
     select.innerHTML = included.length
-      ? included.map(c => '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>").join("")
-      : '<option value="">— no columns yet —</option>';
+      ? included.map(c => '<option value="' + esc(c.id) + '">' + esc(_sd(c.name)) + "</option>").join("")
+      : '<option value="">' + esc(_t("— no columns yet —")) + '</option>';
     // Keep the current pick if it survived, otherwise fall back to the last column.
     if (included.some(c => c.id === wanted)) select.value = wanted;
     else if (included.length) select.value = included[included.length - 1].id;
@@ -2644,16 +2677,16 @@ function wireBoardForm(form, initialDoneId) {
 function decisionRecordHTML(d) {
   const opts = d.options || [];
   const hist = (d.history || []).slice().reverse();
-  const block = (label, body) => `<div style="margin-bottom:18px"><div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(label)}</div>${body}</div>`;
+  const block = (label, body) => `<div style="margin-bottom:18px"><div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(_t(label))}</div>${body}</div>`;
   return `
     <div class="row wrap" style="gap:8px;margin-bottom:18px">
       ${statusBadge(d.status)}${impactBadge(d.impact)}
-      <span class="badge b-neutral">${ic("calendar", 11)}${esc(fmtDate(d.date) || "no date")}</span>
+      <span class="badge b-neutral">${ic("calendar", 11)}${esc(fmtDate(d.date) || _t("no date"))}</span>
       ${(d.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}
     </div>
     ${block("Problem statement", `<p style="font-size:13.5px;font-weight:600;line-height:1.6">${esc(d.problem)}</p>`)}
-    ${block("Decision taken", `<p style="font-size:13px;line-height:1.65">${esc(d.decision || "— not recorded —")}</p>`)}
-    ${block("Why this one", `<p style="font-size:13px;line-height:1.65;color:var(--text-2)">${esc(d.rationale || "— not recorded —")}</p>`)}
+    ${block("Decision taken", `<p style="font-size:13px;line-height:1.65">${esc(d.decision || _t("— not recorded —"))}</p>`)}
+    ${block("Why this one", `<p style="font-size:13px;line-height:1.65;color:var(--text-2)">${esc(d.rationale || _t("— not recorded —"))}</p>`)}
     ${opts.length ? block("Options considered", `<div class="stack-sm">${opts.map(o => `<div class="item" style="padding:10px 12px">
         <div class="grow"><h4>${esc(o.label)}</h4>${o.why ? `<p>${esc(o.why)}</p>` : ""}</div></div>`).join("")}</div>`) : ""}
     ${d.approver ? block("Approved by", `<div class="row" style="gap:10px">${avatar(d.approver, "md")}
@@ -2696,7 +2729,7 @@ function deleteFrom(domain, id, label) {
   });
 }
 function deleteFootBtn(action, id) {
-  return `<button type="button" class="btn btn-danger-soft btn-sm" data-action="${action}" data-id="${id}">${ic("trash", 13)}Delete</button>`;
+  return `<button type="button" class="btn btn-danger-soft btn-sm" data-action="${action}" data-id="${id}">${ic("trash", 13)}${_t("Delete")}</button>`;
 }
 
 const ACTIONS = {
@@ -2790,8 +2823,8 @@ const ACTIONS = {
   },
   "switch-to-local"() {
     confirmDialog({
-      title: "Store in this browser instead?",
-      message: "Your current data is copied into this browser. The JSON files in " + Store.folderName + " are left exactly as they are.",
+      title: _t("Store in this browser instead?"),
+      message: _tp("Your current data is copied into this browser. The JSON files in {folder} are left exactly as they are.", { folder: Store.folderName }),
       confirmLabel: "Copy to browser",
       onConfirm: async () => {
         Store.mode = "local"; Store.dir = null;
@@ -2845,10 +2878,10 @@ const ACTIONS = {
   },
   "reset-workspace"() {
     confirmDialog({
-      title: "Reset this workspace?",
-      messageHTML: "Every board, decision, note, goal, milestone and document will be deleted" +
-        (Store.mode === "folder" ? ", and the JSON files in <b>" + esc(Store.folderName) + "</b> will be removed" : "") +
-        ". There is no undo. Consider exporting a backup first.",
+      title: _t("Reset this workspace?"),
+      messageHTML: Store.mode === "folder"
+        ? _tp("Every board, decision, note, goal, milestone and document will be deleted, and the JSON files in <b>{folder}</b> will be removed. There is no undo. Consider exporting a backup first.", { folder: esc(Store.folderName) })
+        : _t("Every board, decision, note, goal, milestone and document will be deleted. There is no undo. Consider exporting a backup first."),
       confirmLabel: "Delete everything", danger: true, requireText: "RESET",
       onConfirm: async () => {
         await Store.wipe();
@@ -2868,9 +2901,14 @@ const ACTIONS = {
     if (v === LANG) return;
     LANG = v;
     try { localStorage.setItem(LANG_KEY, v); } catch (e) { /* private mode */ }
+    /* The wizard has its own switch, and it is the only modal worth keeping:
+       it holds no typing, and render() never repaints it. Everything else is
+       closed rather than redrawn, so unsaved typing is not silently lost. */
+    const inWizard = !!$(".modal.wizard");
     closeAllModals();
     applyLang();
     render();
+    if (inWizard) openWizard();
   },
 
   /* ---------- theme & settings ---------- */
@@ -2917,7 +2955,7 @@ const ACTIONS = {
         columns: b.columns.map(c => Object.assign({}, c, { include: true })),
         doneColumnId: currentDone ? currentDone.id : "",
       },
-      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-board">${ic("trash", 13)}Delete board</button>`,
+      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-board">${ic("trash", 13)}${_t("Delete board")}</button>`,
       afterRender: form => wireBoardForm(form, currentDone ? currentDone.id : ""),
       onSave: v => {
         const cols = normaliseColumns(v.columns, b.columns, v.doneColumnId);
@@ -2938,9 +2976,12 @@ const ACTIONS = {
         if (!orphans.length) return apply();
         confirmDialog({
           title: _tp("Move {tasks}?", { tasks: pluralise(orphans.length, "task") }),
-          messageHTML: "You removed " + pluralise(b.columns.length - cols.length, "column") + " that still " +
-            (orphans.length === 1 ? "holds a task" : "hold tasks") + ". " +
-            pluralise(orphans.length, "task") + " will move to <b>" + esc(cols[0].name) + "</b>.",
+          messageHTML: _tp("You removed {columns} that still {holds}. {tasks} will move to <b>{column}</b>.", {
+            columns: pluralise(b.columns.length - cols.length, "column"),
+            holds: orphans.length === 1 ? _t("holds a task") : _t("hold tasks"),
+            tasks: pluralise(orphans.length, "task"),
+            column: esc(cols[0].name),
+          }),
           confirmLabel: "Move and save",
           onConfirm: apply,
         });
@@ -2951,8 +2992,8 @@ const ACTIONS = {
     const b = activeBoard();
     if (!b) return;
     confirmDialog({
-      title: "Delete this board?",
-      message: "“" + b.name + "” and its " + pluralise(b.tasks.length, "task") + " will be deleted.",
+      title: _t("Delete this board?"),
+      message: _tp("“{name}” and its {tasks} will be deleted.", { name: b.name, tasks: pluralise(b.tasks.length, "task") }),
       confirmLabel: "Delete board", danger: true,
       onConfirm: () => mutate(["boards", "settings"], () => {
         S.boards.items = S.boards.items.filter(x => x.id !== b.id);
@@ -3016,7 +3057,7 @@ const ACTIONS = {
     if (!t) return;
     openModal({
       title: "Edit task", fields: taskFields(b), values: t,
-      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-task" data-id="${t.id}">${ic("trash", 13)}Delete</button>`,
+      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-task" data-id="${t.id}">${ic("trash", 13)}${_t("Delete")}</button>`,
       onSave: v => {
         closeAllModals();
         mutate("boards", () => { Object.assign(t, v, { updatedAt: nowISO() }); }, "Updated task: " + v.title, "update");
@@ -3065,7 +3106,7 @@ const ACTIONS = {
       title: "Decision record", subtitle: _tp("Logged {date}", { date: fmtDate(d.createdAt || d.date) }),
       width: "wide", fields: [], bottomHTML: decisionRecordHTML(d),
       cancelLabel: "Close",
-      footLeftHTML: `<button type="button" class="btn btn-ghost btn-sm" data-action="edit-decision" data-id="${d.id}">${ic("edit", 13)}Edit</button>`,
+      footLeftHTML: `<button type="button" class="btn btn-ghost btn-sm" data-action="edit-decision" data-id="${d.id}">${ic("edit", 13)}${_t("Edit")}</button>`,
     });
   },
   "edit-decision"(el) {
@@ -3366,8 +3407,8 @@ ACTIONS["conflict-load"] = async function () {
 };
 ACTIONS["conflict-replace"] = function () {
   confirmDialog({
-    title: "Overwrite the files in that folder?",
-    message: "The workspace stored in " + Store.folderName + " will be replaced by the one on screen.",
+    title: _t("Overwrite the files in that folder?"),
+    message: _tp("The workspace stored in {folder} will be replaced by the one on screen.", { folder: Store.folderName }),
     confirmLabel: "Overwrite", danger: true, requireText: "OVERWRITE",
     onConfirm: async () => {
       S = window.__conflictSnapshot;
@@ -3574,6 +3615,7 @@ window.addEventListener("beforeunload", ev => {
 const NL = {
   "Product Owner Workspace": "Product Owner Werkruimte",
   "Workspace by Tonny Sluijs.": "Werkruimte van Tonny Sluijs.",
+  "by Tonny Sluijs": "van Tonny Sluijs",
   "Product Owner": "Product Owner",
   "Overview": "Overzicht",
   "Taskboard": "Takenbord",
@@ -3592,6 +3634,11 @@ const NL = {
   "Recent Activity": "Recente activiteit",
   "Open settings": "Instellingen openen",
   "Good morning": "Goedemorgen",
+  "Welcome": "Welkom",
+  "just now": "net nu",
+  "{n}m ago": "{n} min geleden",
+  "{n}h ago": "{n} u geleden",
+  "{n}d ago": "{n} d geleden",
   "Good afternoon": "Goedemiddag",
   "Good evening": "Goedenavond",
   "Let's build something amazing today.": "Laten we vandaag iets moois bouwen.",
@@ -3640,6 +3687,8 @@ const NL = {
   "Objective": "Doelstelling",
   "Objectives": "Doelstellingen",
   "Milestone": "Mijlpaal",
+  "milestone": "mijlpaal",
+  "milestones": "mijlpalen",
   "Milestones": "Mijlpalen",
   "Decision": "Besluit",
   "Decisions": "Besluiten",
@@ -3667,6 +3716,8 @@ const NL = {
   "Language": "Taal",
   "Storage": "Opslag",
   "{field} is required.": "{field} is verplicht.",
+  "{file}.json is not valid JSON — it was skipped, not overwritten.":
+    "{file}.json is geen geldige JSON — overgeslagen, niet overschreven.",
   "comma, separated": "komma, gescheiden",
   "all clear": "alles in orde",
   "Choose the language of the interface. Your saved data is not affected.":
@@ -3732,6 +3783,12 @@ const NL = {
   "New Task": "Nieuwe taak",
   "New task": "Nieuwe taak",
   "Add Task": "Taak toevoegen",
+  "Add your first item": "Voeg je eerste item toe",
+  "New Milestone": "Nieuwe mijlpaal",
+  "New Note": "Nieuwe notitie",
+  "New Session": "Nieuwe sessie",
+  "Start your first retro": "Start je eerste retro",
+  "Write your first note": "Schrijf je eerste notitie",
   "Add task": "Taak toevoegen",
   "Edit task": "Taak bewerken",
   "Board": "Bord",
@@ -3820,6 +3877,10 @@ const NL = {
   "The record of what was decided, by whom, and — most importantly — why.":
     "Het overzicht van wat besloten is, door wie, en — het belangrijkste — waarom.",
   "Problem statement": "Probleemstelling",
+  "Why this one": "Waarom deze",
+  "History": "Geschiedenis",
+  "no date": "geen datum",
+  "— not recorded —": "— niet vastgelegd —",
   "Approved by": "Goedgekeurd door",
   "No decisions logged": "Nog geen besluiten vastgelegd",
   "Nothing decided yet": "Nog niets besloten",
@@ -3979,6 +4040,37 @@ const NL = {
   "There is no undo.": "Dit kan niet ongedaan gemaakt worden.",
   "Reset this workspace": "Werkruimte resetten",
   "Reset this workspace?": "Werkruimte resetten?",
+  "Folder": "Map",
+  "{done}/{total} actions done": "{done}/{total} acties gedaan",
+  "Reminder: {text}": "Herinnering: {text}",
+  "Overdue task: {title}": "Taak te laat: {title}",
+  "Decision still pending: {problem}": "Besluit nog open: {problem}",
+  "Milestone past due: {title}": "Mijlpaal over datum: {title}",
+  "All status": "Alle statussen",
+  "— no columns yet —": "— nog geen kolommen —",
+  "No period set": "Geen periode ingesteld",
+  "Folder: {name}": "Map: {name}",
+  "This browser (localStorage)": "Deze browser (localStorage)",
+  "This browser could not remember your folder — please pick it again.":
+    "Deze browser kon je map niet onthouden — kies hem opnieuw.",
+  "IndexedDB is blocked by another tab": "IndexedDB wordt geblokkeerd door een ander tabblad",
+  "IndexedDB timed out": "IndexedDB gaf een time-out",
+  "Permission to write in that folder was not granted.":
+    "Geen toestemming gekregen om in die map te schrijven.",
+  "Your current data is copied into this browser. The JSON files in {folder} are left exactly as they are.":
+    "Je huidige data wordt naar deze browser gekopieerd. De JSON-bestanden in {folder} blijven precies zoals ze zijn.",
+  "The workspace stored in {folder} will be replaced by the one on screen.":
+    "De werkruimte in {folder} wordt vervangen door die op het scherm.",
+  "“{name}” and its {tasks} will be deleted.":
+    "“{name}” en de bijbehorende {tasks} worden verwijderd.",
+  "You removed {columns} that still {holds}. {tasks} will move to <b>{column}</b>.":
+    "Je hebt {columns} verwijderd die nog {holds}. {tasks} worden verplaatst naar <b>{column}</b>.",
+  "holds a task": "een taak bevat",
+  "hold tasks": "taken bevatten",
+  "Every board, decision, note, goal, milestone and document will be deleted. There is no undo. Consider exporting a backup first.":
+    "Elk bord, besluit, notitie, doel, mijlpaal en document wordt verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
+  "Every board, decision, note, goal, milestone and document will be deleted, and the JSON files in <b>{folder}</b> will be removed. There is no undo. Consider exporting a backup first.":
+    "Elk bord, besluit, notitie, doel, mijlpaal en document wordt verwijderd, en de JSON-bestanden in <b>{folder}</b> worden verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
   "Delete everything": "Alles verwijderen",
   "Backup downloaded.": "Back-up gedownload.",
   "That file is not valid JSON.": "Dat bestand is geen geldige JSON.",
@@ -4042,6 +4134,21 @@ const NL = {
     "Deze browser onthoudt de map niet — je wordt de volgende keer opnieuw gevraagd om hem te kiezen.",
   ".json is not valid JSON — it was skipped, not overwritten.":
     ".json is geen geldige JSON — het is overgeslagen, niet overschreven.",
+
+  /* ---------------------------------------------------------------------
+     Starter content, read ONLY by _sd(). These are the strings that seed*()
+     and default*() wrote into the workspace on first run. The saved data,
+     the folder JSON and the export keep the English on the left; only the
+     screen shows the Dutch on the right. Never looked up by _t(), so a key
+     here can never translate something the user typed themselves.
+     ------------------------------------------------------------------ */
+  "seed|Backlog": "Backlog",
+  "seed|To Do": "Te doen",
+  "seed|In Progress": "In behandeling",
+  "seed|In Review": "In review",
+  "seed|Review": "Review",
+  "seed|Done": "Klaar",
+  "seed|My Workspace": "Mijn werkruimte",
 };
 
 

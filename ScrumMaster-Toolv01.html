@@ -743,6 +743,8 @@ kbd{
 .wiz-hero{text-align:center;padding:30px 26px 6px}
 .wiz-hero h2{font-size:22px;font-weight:800;letter-spacing:-.03em;margin-top:16px}
 .wiz-hero p{font-size:13.5px;color:var(--text-2);margin-top:8px;line-height:1.6}
+/* The overlay covers the top-bar switch, so the wizard carries its own. */
+.wiz-lang{display:flex;justify-content:center;padding:0 26px 22px}
 .choice{
   display:flex;gap:14px;align-items:flex-start;width:100%;text-align:left;
   border:1.5px solid var(--border);border-radius:var(--r-lg);
@@ -969,8 +971,31 @@ function _tp(s, vars) {
   return String(_t(s)).replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m));
 }
 
+/**
+ * Display label for starter content - the text seed*() and default*() wrote
+ * into the workspace on first run (checklist steps, board columns, ceremony
+ * agendas, the Definition of Done).
+ *
+ * That text is DATA: it stays English in storage, in the folder JSON and in
+ * the export, so switching language never rewrites a saved record. Only what
+ * is on screen changes.
+ *
+ * Looked up ONLY under a "seed|" key, with no fallback to the plain key, so a
+ * note the user titles "Settings" can never come back as "Instellingen".
+ * Anything the user typed themselves passes through untouched.
+ */
+function _sd(s) {
+  if (LANG !== "nl" || typeof s !== "string" || !s) return s;
+  const k = "seed|" + s;
+  return Object.prototype.hasOwnProperty.call(NL, k) ? NL[k] : s;
+}
+
 /** Console helper: which wrapped strings still have no Dutch. */
 window.__i18nMissing = () => Array.from(_missing).sort();
+
+/* Dates are display, never storage: the stored value stays an ISO string and
+   only the rendering follows the chosen language. */
+function dateLocale() { return LANG === "nl" ? "nl-NL" : "en-GB"; }
 
 /* Display labels for stored enum values. The VALUE stays an English identifier
    in the data and in CSS class names; only what the user reads is translated. */
@@ -996,6 +1021,11 @@ function applyLang() {
   const set = (sel, text) => { const el = $(sel); if (el) el.textContent = text; };
   set(".brandinfo .sub", _t("Scrum Master Workspace"));
   set(".brand-sub", _t("Workspace by Tonny Sluijs."));
+  /* The wizard path never reaches render(), so the static greeting would stay
+     English until onboarding finished. renderTopbar() replaces both with the
+     personalised greeting once state is loaded. */
+  set("#greet", _t("Welcome"));
+  set("#greetSub", _t("Let's build something amazing today."));
   const search = $("#search");
   if (search) search.placeholder = _t("Search everything…");
   const bell = $("#bellBtn"); if (bell) bell.title = _t("Alerts");
@@ -1027,24 +1057,24 @@ function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
   if (isNaN(d)) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: "numeric" });
 }
 function fmtShort(iso) {
   if (!iso) return "";
   const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
   if (isNaN(d)) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
 }
 function relTime(iso) {
   if (!iso) return "";
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.round(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return m + "m ago";
+  if (m < 1) return _t("just now");
+  if (m < 60) return _tp("{n}m ago", { n: m });
   const h = Math.round(m / 60);
-  if (h < 24) return h + "h ago";
+  if (h < 24) return _tp("{n}h ago", { n: h });
   const d = Math.round(h / 24);
-  if (d < 31) return d + "d ago";
+  if (d < 31) return _tp("{n}d ago", { n: d });
   return fmtDate(iso);
 }
 /** Days until a YYYY-MM-DD date. Negative = overdue. */
@@ -1353,7 +1383,7 @@ const Store = {
       } catch (e) {
         if (e && (e.name === "NotFoundError" || e.name === "NotAllowedError")) return null;
         if (e instanceof SyntaxError) {
-          toast(key + ".json is not valid JSON — it was skipped, not overwritten.", "err", 8000);
+          toast(_tp("{file}.json is not valid JSON — it was skipped, not overwritten.", { file: key }), "err", 8000);
           return null;
         }
         return null;
@@ -1389,8 +1419,8 @@ const Store = {
   },
 
   location() {
-    if (this.mode === "folder") return this.folderName ? "Folder: " + this.folderName : "Folder";
-    return "This browser (localStorage)";
+    if (this.mode === "folder") return this.folderName ? _tp("Folder: {name}", { name: this.folderName }) : _t("Folder");
+    return _t("This browser (localStorage)");
   },
 };
 
@@ -1427,7 +1457,7 @@ async function flush() {
   } catch (e) {
     keys.forEach(k => dirty.add(k));
     setSaveState("error");
-    toast(_tp("Could not save: {msg}", { msg: (e && e.message ? e.message : e) }), "err", 7000);
+    toast(_tp("Could not save: {msg}", { msg: _t(e && e.message ? e.message : String(e)) }), "err", 7000);
   } finally {
     saving = false;
     if (dirty.size) scheduleSave();
@@ -1442,9 +1472,9 @@ function setSaveState(kind) {
   const el = $("#saveState");
   if (!el) return;
   const map = {
-    saving: [ic("save", 13), "Saving…", "var(--text-3)"],
-    saved: [ic("checkCircle", 13), "Saved", "var(--green)"],
-    error: [ic("alert", 13), "Not saved", "var(--red)"],
+    saving: [ic("save", 13), _t("Saving…"), "var(--text-3)"],
+    saved: [ic("checkCircle", 13), _t("Saved"), "var(--green)"],
+    error: [ic("alert", 13), _t("Not saved"), "var(--red)"],
   };
   const m = map[kind] || map.saved;
   el.innerHTML = m[0] + "<span>" + m[1] + "</span>";
@@ -1617,7 +1647,7 @@ function openModal(opts) {
       const out = collectForm(form, fields);
       const missing = fields.filter(f => f.required && !String(out[f.name] || "").trim());
       if (missing.length) {
-        toast(missing[0].label + " is required.", "warn");
+        toast(_tp("{field} is required.", { field: _t(missing[0].label) }), "warn");
         const el = form.querySelector('[name="' + missing[0].name + '"]');
         if (el) el.focus();
         return;
@@ -1663,7 +1693,7 @@ function fieldHTML(f, value) {
       break;
     case "tags":
       input = '<input class="inp" type="text" id="' + id + '" name="' + f.name + '" value="' +
-        esc(Array.isArray(value) ? value.join(", ") : (value || "")) + '" placeholder="' + esc(f.placeholder || "comma, separated") + '">';
+        esc(Array.isArray(value) ? value.join(", ") : (value || "")) + '" placeholder="' + esc(_t(f.placeholder || "comma, separated")) + '">';
       break;
     case "checkbox":
       return '<div class="' + cls + '"><label class="row" style="cursor:pointer;font-weight:600">' +
@@ -1683,10 +1713,10 @@ function repeaterHTML(f, value) {
   // A header row so no control in the grid is left unlabelled.
   const headers = f.headers
     ? '<div class="rep-row rep-head">' +
-      (f.checkKey ? '<span class="rep-h rep-h-check">' + esc(f.headers[0]) + "</span>" : "") +
+      (f.checkKey ? '<span class="rep-h rep-h-check">' + esc(_t(f.headers[0])) + "</span>" : "") +
       f.sub.filter(s => s.type !== "hidden").map((s, i) =>
         '<span class="rep-h"' + (s.width ? ' style="flex:0 0 ' + s.width + '"' : "") + ">" +
-        esc(f.headers[(f.checkKey ? 1 : 0) + i] || "") + "</span>").join("") +
+        esc(_t(f.headers[(f.checkKey ? 1 : 0) + i] || "")) + "</span>").join("") +
       '<span class="rep-h" style="flex:0 0 30px"></span></div>'
     : "";
   return '<div data-rep="' + f.name + '" data-subs=\'' + esc(JSON.stringify(f.sub)) + "'" +
@@ -1695,7 +1725,7 @@ function repeaterHTML(f, value) {
     headers +
     '<div class="rep-rows">' + rows + "</div>" +
     '<button type="button" class="btn btn-ghost btn-sm" data-action="rep-add" data-rep="' + f.name + '" style="margin-top:2px">' +
-    ic("plus", 13) + esc(f.addLabel || "Add row") + "</button></div>";
+    ic("plus", 13) + esc(_t(f.addLabel || "Add row")) + "</button></div>";
 }
 function repeaterRow(f, v) {
   v = v || {};
@@ -1714,12 +1744,12 @@ function repeaterRow(f, v) {
         }).join("") + "</select>";
     }
     const type = s.type === "date" || s.type === "number" ? s.type : "text";
-    return '<input class="inp" type="' + type + '" data-sub="' + s.name + '" placeholder="' + esc(s.placeholder || s.name) +
+    return '<input class="inp" type="' + type + '" data-sub="' + s.name + '" placeholder="' + esc(_t(s.placeholder || s.name)) +
       '" value="' + esc(v[s.name] || "") + '"' + (s.width ? ' style="flex:0 0 ' + s.width + '"' : "") + ">";
   }).join("");
   const ticked = v[f.checkKey] === undefined ? !!f.checkDefault : !!v[f.checkKey];
   const box = '<input type="checkbox" class="rep-check" data-sub="' + f.checkKey + '" ' + (ticked ? "checked" : "") +
-    ' title="' + esc(f.checkTitle || "Done") + '" aria-label="' + esc(f.checkTitle || "Done") + '">';
+    ' title="' + esc(_t(f.checkTitle || "Done")) + '" aria-label="' + esc(_t(f.checkTitle || "Done")) + '">';
   const check = !f.checkKey ? ""
     : f.headers ? '<span class="rep-check-cell">' + box + "</span>" : box;
   return '<div class="rep-row">' + check + inputs +
@@ -1797,13 +1827,13 @@ function openWizard() {
             '<polygon points="10,14 24,22 24,38 10,30" fill="url(#g2)"/>' +
             '<polygon points="24,22 38,14 38,30 24,38" fill="url(#g3)"/></svg>' +
           "<h2>" + esc(_t('Welcome to your Scrum Master Dashboard')) + "</h2>" +
-          "<p>Everything you create stays on this machine. Choose where it should live — you can switch later in Settings.</p>" +
+          "<p>" + esc(_t("Everything you create stays on this machine. Choose where it should live — you can switch later in Settings.")) + "</p>" +
         "</div>" +
         '<div class="modal-body stack">' +
           '<button class="choice" data-action="wiz-local">' +
             '<span class="ic">' + ic("browser", 21) + "</span>" +
             "<span><h4>" + esc(_t('Store in this browser')) + "</h4>" +
-            "<p>Saved instantly to this browser's local storage. Nothing to set up — but the data is tied to this browser profile and is lost if you clear site data.</p></span>" +
+            "<p>" + esc(_t("Saved instantly to this browser's local storage. Nothing to set up — but the data is tied to this browser profile and is lost if you clear site data.")) + "</p></span>" +
           "</button>" +
           '<button class="choice' + (supported ? "" : " off") + '" ' + (supported ? 'data-action="wiz-folder"' : "disabled") + ">" +
             '<span class="ic">' + ic("folder", 21) + "</span>" +
@@ -1813,13 +1843,17 @@ function openWizard() {
           "</button>" +
           (supported ? "" :
             '<div class="notice">' + ic("alert", 16) +
-            "<span><b>" + esc(_t('Folder storage is unavailable in this browser.')) + "</b> It needs Chrome or Edge. " +
-            "If you are already in Chrome, open this file through a local server " +
-            "(<code>python -m http.server</code> in this folder, then visit <code>localhost:8000/ScrumMaster-Toolv01.html</code>) and the option will appear.</span></div>") +
+            "<span><b>" + esc(_t('Folder storage is unavailable in this browser.')) + "</b> " + esc(_t("It needs Chrome or Edge.")) + " " +
+            _tp("If you are already in Chrome, open this file through a local server (<code>python -m http.server</code> in this folder, then visit <code>localhost:8000/{file}</code>) and the option will appear.", { file: "ScrumMaster-Toolv01.html" }) + "</span></div>") +
           '<div class="notice info">' + ic("info", 16) +
-          "<span>You start with the five Scrum events and a starter Definition of Done already filled in — everything else is empty. " +
-          "This workspace is kept separate from any Product Owner dashboard on this machine.</span></div>" +
+          "<span>" + esc(_t("You start with the five Scrum events and a starter Definition of Done already filled in — everything else is empty.")) + " " +
+          esc(_t("This workspace is kept separate from any Product Owner dashboard on this machine.")) + "</span></div>" +
         "</div>" +
+        '<div class="wiz-lang">' +
+          '<div class="seg" title="Language / Taal">' +
+            '<button data-action="set-lang" data-lang="en" class="' + (LANG === "en" ? "on" : "") + '">EN</button>' +
+            '<button data-action="set-lang" data-lang="nl" class="' + (LANG === "nl" ? "on" : "") + '">NL</button>' +
+          "</div></div>" +
       "</div></div>";
 }
 
@@ -1832,7 +1866,7 @@ function openReconnect(handle) {
         "<p>" + esc(_t('Browsers ask again each session before a page may touch your files.')) + "</p></div></div>" +
       '<div class="modal-body stack">' +
         '<div class="notice info">' + ic("folder", 16) + "<span>" + esc(_t("Folder:")) + " <b>" + esc(handle.name) + "</b></span></div>" +
-        '<button class="btn btn-primary btn-block" data-action="reconnect">' + ic("folder", 15) + "Reconnect and load my data</button>" +
+        '<button class="btn btn-primary btn-block" data-action="reconnect">' + ic("folder", 15) + esc(_t("Reconnect and load my data")) + "</button>" +
         '<button class="btn btn-ghost btn-block" data-action="wiz-open">' + esc(_t("Choose a different location instead")) + '</button>' +
       "</div></div></div>";
   window.__pendingHandle = handle;
@@ -1902,12 +1936,12 @@ function renderNav() {
 }
 
 function renderTopbar() {
-  const name = S.settings.profile.name || "Scrum Master";
+  const name = S.settings.profile.name || _t("Scrum Master");
   const h = new Date().getHours();
   const part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   const shown = name.length <= 18 ? name : name.split(" ")[0];
-  $("#greet").innerHTML = esc(part + ", " + shown + "!") + " 👋";
-  $("#greetSub").textContent = S.settings.teamName || S.settings.workspaceName || "Let's clear the way for the team.";
+  $("#greet").innerHTML = esc(_t(part) + ", " + shown + "!") + " 👋";
+  $("#greetSub").textContent = S.settings.teamName || S.settings.workspaceName || _t("Let's clear the way for the team.");
   const av = $("#meAvatar");
   av.textContent = initials(name);
   const hue = hueOf(name);
@@ -1922,7 +1956,7 @@ function renderTopbar() {
 /** Sits under every view. Free to use, so the credit travels with it. */
 function appFooter() {
   return '<footer class="app-foot">' +
-    "<span>SM Dashboard — <b>" + esc(_t('Scrum Master Workspace')) + "</b> · your data never leaves this machine</span>" +
+    "<span>SM Dashboard — <b>" + esc(_t('Scrum Master Workspace')) + "</b> · " + esc(_t("your data never leaves this machine")) + "</span>" +
     '<span class="credit">' + esc(_t("Built by Tonny Sluijs · free to use")) + '</span>' +
     "</footer>";
 }
@@ -2166,7 +2200,7 @@ const CADENCES = [
 ];
 function cadenceLabel(v) {
   const hit = CADENCES.find(c => c.value === v);
-  return hit ? hit.label : (v || "When needed");
+  return hit ? _t(hit.label) : (v || _t("When needed"));
 }
 /** A ceremony is "today" if it is daily on a working day, or explicitly dated. */
 function ceremoniesDueToday() {
@@ -2249,21 +2283,21 @@ function alertItems() {
   const sprint = activeSprint();
 
   agedImpediments().forEach(i => {
-    out.push({ kind: "impediment", icon: "alert", text: "Impediment open " + pluralise(impedimentAge(i), "day") + ": " + i.title, when: fmtShort(i.raisedOn), view: "impediments" });
+    out.push({ kind: "impediment", icon: "alert", text: _tp("Impediment open {days}: {title}", { days: pluralise(impedimentAge(i), "day"), title: i.title }), when: fmtShort(i.raisedOn), view: "impediments" });
   });
   if (board) {
     board.tasks.filter(t => t.blocked && !isTaskDone(t, board) && cardAge(t) >= 2).forEach(t => {
-      out.push({ kind: "blocked", icon: "alert", text: "Blocked " + pluralise(cardAge(t), "day") + ": " + t.title, when: "board", view: "taskboard" });
+      out.push({ kind: "blocked", icon: "alert", text: _tp("Blocked {days}: {title}", { days: pluralise(cardAge(t), "day"), title: t.title }), when: "board", view: "taskboard" });
     });
     board.tasks.filter(t => isOverdue(t, board)).forEach(t => {
-      out.push({ kind: "task", icon: "clock", text: "Overdue task: " + t.title, when: fmtShort(t.due), view: "taskboard" });
+      out.push({ kind: "task", icon: "clock", text: _tp("Overdue task: {title}", { title: t.title }), when: fmtShort(t.due), view: "taskboard" });
     });
   }
   if (sprint && sprint.end) {
     const left = daysUntil(sprint.end);
     const st = sprintStats(sprint);
     if (left !== null && left <= 1 && left >= 0 && st.remaining > 0) {
-      out.push({ kind: "sprint", icon: "refresh", text: sprint.name + " ends " + (left === 0 ? "today" : "tomorrow") + " with " + st.remaining + " " + st.unit + " left", when: fmtShort(sprint.end), view: "sprints" });
+      out.push({ kind: "sprint", icon: "refresh", text: _tp("{name} ends {when} with {n} {unit} left", { name: sprint.name, when: left === 0 ? _t("today") : _t("tomorrow"), n: st.remaining, unit: _t(st.unit) }), when: fmtShort(sprint.end), view: "sprints" });
     }
     if (left !== null && left < 0) {
       out.push({ kind: "sprint", icon: "refresh", text: sprint.name + " ran past its end date — close it", when: fmtShort(sprint.end), view: "sprints" });
@@ -2274,21 +2308,21 @@ function alertItems() {
   });
   openRetroActions().forEach(x => {
     const age = x.date ? -(daysUntil(x.date) || 0) : 0;
-    if (age >= 14) out.push({ kind: "retro", icon: "history", text: "Retro action still open: " + x.action.text.slice(0, 60), when: fmtShort(x.date), view: "retrospective" });
+    if (age >= 14) out.push({ kind: "retro", icon: "history", text: _tp("Retro action still open: {text}", { text: x.action.text.slice(0, 60) }), when: fmtShort(x.date), view: "retrospective" });
   });
   S.notes.items.forEach(n => {
     if (n.remindAt && daysUntil(n.remindAt) <= 0) {
-      out.push({ kind: "note", icon: "bell", text: "Reminder: " + n.text.slice(0, 70), when: fmtShort(n.remindAt), view: "notes" });
+      out.push({ kind: "note", icon: "bell", text: _tp("Reminder: {text}", { text: n.text.slice(0, 70) }), when: fmtShort(n.remindAt), view: "notes" });
     }
   });
   S.roadmap.items.forEach(m => {
     if (m.date && m.status !== "done" && daysUntil(m.date) < 0) {
-      out.push({ kind: "release", icon: "flag", text: "Release past due: " + m.title, when: fmtShort(m.date), view: "roadmap" });
+      out.push({ kind: "release", icon: "flag", text: _tp("Release past due: {title}", { title: m.title }), when: fmtShort(m.date), view: "roadmap" });
     }
   });
   S.decisions.items.forEach(d => {
     if (d.status === "pending" && d.reviewBy && daysUntil(d.reviewBy) < 0) {
-      out.push({ kind: "decision", icon: "scale", text: "Decision still pending: " + d.problem.slice(0, 60), when: fmtShort(d.reviewBy), view: "decisions" });
+      out.push({ kind: "decision", icon: "scale", text: _tp("Decision still pending: {problem}", { problem: d.problem.slice(0, 60) }), when: fmtShort(d.reviewBy), view: "decisions" });
     }
   });
   return out;
@@ -2338,7 +2372,7 @@ function donut(segments, centreValue, centreLabel) {
   }).join("");
   const track = '<circle cx="18" cy="18" r="15.915" fill="none" stroke="var(--surface-3)" stroke-width="3.2"></circle>';
   return '<div class="donut-wrap"><div class="donut"><svg viewBox="0 0 36 36">' + track + rings + "</svg>" +
-    '<div class="mid"><b>' + esc(centreValue) + "</b><span>" + esc(centreLabel) + "</span></div></div></div>";
+    '<div class="mid"><b>' + esc(centreValue) + "</b><span>" + esc(_t(centreLabel)) + "</span></div></div></div>";
 }
 
 /* ------------------------------------------------------------- charts --- */
@@ -2377,7 +2411,7 @@ function burndownSVG(sprint, compact) {
   const area = pts.length > 1
     ? '<polygon class="area" points="' + pts[0].x + "," + (T + plotH) + " " + pts.map(p => p.x + "," + p.y).join(" ") + " " + pts[pts.length - 1].x + "," + (T + plotH) + '"/>'
     : "";
-  const dots = pts.map(p => '<circle class="pt" cx="' + p.x + '" cy="' + p.y + '" r="2.6"><title>' + esc(fmtShort(p.d) + " · " + p.v + " " + st.unit + " left") + "</title></circle>").join("");
+  const dots = pts.map(p => '<circle class="pt" cx="' + p.x + '" cy="' + p.y + '" r="2.6"><title>' + esc(_tp("{date} · {n} {unit} left", { date: fmtShort(p.d), n: p.v, unit: _t(st.unit) })) + "</title></circle>").join("");
 
   const ticks = days.map((d, i) => {
     if (days.length > 8 && i % Math.ceil(days.length / 6) !== 0 && i !== days.length - 1) return "";
@@ -2424,7 +2458,7 @@ function velocitySVG(sprints) {
   return '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(_t("Velocity per Sprint")) + '">' +
     grid + bars + avgLine + "</svg>" +
     '<div class="chart-legend"><span><i style="background:var(--primary)"></i>' + esc(_t("Delivered")) + '</span>' +
-    '<span><i style="background:var(--amber)"></i>Average ' + avg + "</span></div>";
+    '<span><i style="background:var(--amber)"></i>' + esc(_tp("Average {n}", { n: avg })) + "</span></div>";
 }
 /** "Sprint 14" → "14" so the axis labels stay readable. */
 function shortSprintName(name) {
@@ -2458,7 +2492,7 @@ function taskCard(t, board, col) {
       <div class="task-foot">
         ${priorityBadge(t.priority)}
         <div class="row" style="gap:6px">
-          ${stale ? `<span class="task-meta" title="Untouched for ${cardAge(t)} days" style="color:var(--amber)">${ic("clock", 11, 2.4)}${cardAge(t)}d</span>` : ""}
+          ${stale ? `<span class="task-meta" title="${esc(_tp("Untouched for {days}", { days: pluralise(cardAge(t), "day") }))}" style="color:var(--amber)">${ic("clock", 11, 2.4)}${cardAge(t)}d</span>` : ""}
           ${t.assignee ? avatar(t.assignee) : ""}
           ${t.due ? `<span class="task-meta ${late ? "late" : ""}">${late ? ic("alert", 11, 2.4) : ""}${esc(fmtShort(t.due))}</span>` : ""}
           <span class="task-move">
@@ -2482,16 +2516,16 @@ function kanbanHTML(board, compact) {
     const pts = inCol.reduce((a, t) => a + taskPoints(t), 0);
     return `<div class="kcol ${compact ? "compact" : ""}" data-accent="${esc(col.accent || "slate")}" data-col-id="${col.id}" data-drop-col="${col.id}">
         <div class="kcol-head">
-          <span class="name grow truncate">${esc(col.name)}</span>
+          <span class="name grow truncate">${esc(_sd(col.name))}</span>
           ${pts ? `<span class="mini dim" title="${_t("Story points in this column")}">${pts}p</span>` : ""}
-          ${col.wip ? `<span class="mini bold ${over ? "over" : "dim"}" title="Work-in-progress limit${over ? " exceeded" : ""}">${all}/${col.wip}</span>` : ""}
+          ${col.wip ? `<span class="mini bold ${over ? "over" : "dim"}" title="${esc(over ? _t("Work-in-progress limit exceeded") : _t("Work-in-progress limit"))}">${all}/${col.wip}</span>` : ""}
           <span class="n">${all}</span>
         </div>
         <div class="kbody">
           ${tasks.length ? tasks.map(t => taskCard(t, board, col)).join("")
-            : `<div class="empty sm" style="padding:16px 8px"><p class="mini">${q ? "No match here" : "Drop tasks here"}</p></div>`}
+            : `<div class="empty sm" style="padding:16px 8px"><p class="mini">${q ? _t("No match here") : _t("Drop tasks here")}</p></div>`}
         </div>
-        <button class="kadd" data-action="new-task" data-col-id="${col.id}">${ic("plus", 12, 2.6)}Add Task</button>
+        <button class="kadd" data-action="new-task" data-col-id="${col.id}">${ic("plus", 12, 2.6)}${_t("Add Task")}</button>
       </div>`;
   }).join("") + `</div>`;
 }
@@ -2505,7 +2539,7 @@ function boardSelector() {
   return `<select class="sel sel-auto" data-action="set-board" title="${_t("Switch board or create a new one")}">
       ${boards.map(b => `<option value="${b.id}" ${active && b.id === active.id ? "selected" : ""}>Board: ${esc(b.name)}${tracksSprint(b) ? "" : " (private)"}</option>`).join("")}
       <option disabled>──────────</option>
-      <option value="${NEW_BOARD_OPTION}">+ New board…</option>
+      <option value="${NEW_BOARD_OPTION}">${_t("+ New board…")}</option>
     </select>`;
 }
 
@@ -2544,8 +2578,8 @@ VIEWS.overview = function () {
 
   return `
   ${pageHead("Overview", "Where the Sprint stands, and what is in the team's way right now.", `
-    <button class="btn btn-ghost" data-action="new-impediment">${ic("alert", 14)}Raise Impediment</button>
-    <button class="btn btn-primary" data-action="open-standup">${ic("users", 14)}${standup ? "Continue standup" : "Run standup"}</button>`)}
+    <button class="btn btn-ghost" data-action="new-impediment">${ic("alert", 14)}${_t("Raise Impediment")}</button>
+    <button class="btn btn-primary" data-action="open-standup">${ic("users", 14)}${standup ? _t("Continue standup") : _t("Run standup")}</button>`)}
 
   ${sprintStrip(sprint)}
 
@@ -2556,11 +2590,11 @@ VIEWS.overview = function () {
       <div class="card">
         <div class="card-head">
           <div class="card-title"><span class="tile-icon">${ic("board", 18, 2.2)}</span>
-            <div><h3>${esc(board ? board.name : "Sprint Board")}${board && !tracksSprint(board) ? ` <span class="badge b-neutral">${_t("Private")}</span>` : ""}</h3>
+            <div><h3>${esc(board ? board.name : _t("Sprint Board"))}${board && !tracksSprint(board) ? ` <span class="badge b-neutral">${_t("Private")}</span>` : ""}</h3>
               <span class="sub">${board
                 ? esc(pluralise(st.total, "card")) + " · " + st.percent + "% finished" +
                   (boardCount > 1 ? " · " + boardCount + " boards" : "")
-                : "No board yet"}</span></div>
+                : _t("No board yet")}</span></div>
           </div>
           <div class="row">
             ${boardSelector()}
@@ -2571,7 +2605,7 @@ VIEWS.overview = function () {
         ${board ? kanbanHTML(board, true)
           : emptyState("board", "No board yet",
             "Create your first board. You can keep as many as you like — one per team, plus a private one for your own Scrum Master work.",
-            `<button class="btn btn-primary" data-action="new-board">${ic("plus", 14)}Create board</button>`)}
+            `<button class="btn btn-primary" data-action="new-board">${ic("plus", 14)}${_t("Create board")}</button>`)}
         ${board && boardCount === 1 ? `<p class="mini dim" style="text-align:center;padding-top:12px">
           Need somewhere for your own work? <button class="link" data-action="new-board">${_t("Add a second board")}</button> — the dropdown switches between them.</p>` : ""}
       </div>
@@ -2581,10 +2615,10 @@ VIEWS.overview = function () {
         <div class="card-head">
           <div class="card-title"><span class="tile-icon" style="background:var(--red-weak);color:var(--red)">${ic("alert", 18, 2.2)}</span>
             <div><h3>${_t("In the way")}</h3>
-              <span class="sub">${impediments.length ? esc(pluralise(openImpediments().length, "open impediment")) + (agedCount ? " · " + agedCount + " aging" : "") : "Nothing blocking the team"}</span></div>
+              <span class="sub">${impediments.length ? esc(pluralise(openImpediments().length, "open impediment")) + (agedCount ? " · " + _tp("{n} aging", { n: agedCount }) : "") : _t("Nothing blocking the team")}</span></div>
           </div>
           <div class="row">
-            <button class="btn btn-primary btn-sm" data-action="new-impediment">${ic("plus", 12)}Raise</button>
+            <button class="btn btn-primary btn-sm" data-action="new-impediment">${ic("plus", 12)}${_t("Raise")}</button>
             <button class="icon-btn sq" data-action="go" data-view="impediments" title="${_t("Open the register")}">${ic("external", 14)}</button>
           </div>
         </div>
@@ -2600,7 +2634,7 @@ VIEWS.overview = function () {
           </button>`).join("")}</div>`
           : emptyState("checkCircle", "Nothing in the way",
             "The moment something stalls the team, raise it here. The age counter is what turns a quiet blocker into a real conversation.",
-            `<button class="btn btn-soft btn-sm" data-action="new-impediment">${ic("plus", 12)}Raise an impediment</button>`, true)}
+            `<button class="btn btn-soft btn-sm" data-action="new-impediment">${ic("plus", 12)}${_t("Raise an impediment")}</button>`, true)}
       </div>
 
       <!-- Retro actions -->
@@ -2630,15 +2664,15 @@ VIEWS.overview = function () {
             <div><h3>${_t("Decision Log")}</h3><span class="sub">${_t("What was decided, by whom, and why")}</span></div>
           </div>
           <div class="row">
-            <button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}New Decision</button>
+            <button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}${_t("New Decision")}</button>
             <button class="icon-btn sq" data-action="go" data-view="decisions" title="${_t("Open decision log")}">${ic("external", 14)}</button>
           </div>
         </div>
         ${decisions.length ? decisionTable(decisions, true)
           : emptyState("scale", "No decisions logged", "Record the choices the team makes together — the ones that get re-litigated three months later because nobody wrote down why.",
-            `<button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}Log your first decision</button>`)}
+            `<button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}${_t("Log your first decision")}</button>`)}
         ${decisions.length ? `<div style="text-align:center;padding-top:14px">
-          <a class="link" data-action="go" data-view="decisions" href="#">View all decisions ${ic("arrowR", 13, 2.6)}</a></div>` : ""}
+          <a class="link" data-action="go" data-view="decisions" href="#">${_t("View all decisions")} ${ic("arrowR", 13, 2.6)}</a></div>` : ""}
       </div>
 
       <!-- Four small cards -->
@@ -2652,12 +2686,12 @@ VIEWS.overview = function () {
             <p class="mini dim bold" style="text-transform:uppercase;letter-spacing:.05em">${esc(fmtDate(latest.date))}</p>
             <div class="row" style="gap:10px;margin-top:8px">
               <b style="font-size:20px;color:${latestAvg >= 4 ? "var(--green)" : latestAvg >= 3 ? "var(--amber)" : "var(--red)"}">${latestAvg}</b>
-              <span class="tiny dim">out of 5</span>
+              <span class="tiny dim">${_t("out of 5")}</span>
             </div>
-            <p class="tiny muted" style="margin-top:6px">${esc(pluralise((latest.scores || []).length, "person"))} asked</p>`
+            <p class="tiny muted" style="margin-top:6px">${esc(pluralise((latest.scores || []).length, "person", "people"))} asked</p>`
             : `<p class="tiny dim" style="line-height:1.6">${_t("No health check taken yet.")}</p>`}
           <div class="spacer"></div>
-          <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="new-health">${ic("plus", 12, 2.6)}New check</button>
+          <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="new-health">${ic("plus", 12, 2.6)}${_t("New check")}</button>
         </div>
 
         <div class="card" style="padding:16px">
@@ -2670,7 +2704,7 @@ VIEWS.overview = function () {
                 <div class="mini" style="line-height:1.5">${esc(n.text.slice(0, 62))}${n.text.length > 62 ? "…" : ""}</div>`).join("")}
             </div>` : `<p class="tiny dim" style="line-height:1.6">${_t("Nothing noted down yet.")}</p>`}
           <div class="spacer"></div>
-          <button class="link" style="margin-top:12px" data-action="new-note">${ic("plus", 12, 2.6)}Add Note</button>
+          <button class="link" style="margin-top:12px" data-action="new-note">${ic("plus", 12, 2.6)}${_t("Add Note")}</button>
         </div>
 
         <div class="card" style="padding:16px">
@@ -2683,7 +2717,7 @@ VIEWS.overview = function () {
               <span class="badge b-${esc(r.level || "low")}">${esc((r.level || "low")[0].toUpperCase() + (r.level || "low").slice(1))}</span></button>`).join("")}</div>`
             : `<p class="tiny dim" style="line-height:1.6">${_t("No risks flagged.")}</p>`}
           <div class="spacer"></div>
-          <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="new-risk">${ic("plus", 12, 2.6)}Add Risk</button>
+          <button class="btn btn-soft btn-sm btn-block" style="margin-top:12px" data-action="new-risk">${ic("plus", 12, 2.6)}${_t("Add Risk")}</button>
         </div>
 
         <div class="card" style="padding:16px">
@@ -2692,7 +2726,7 @@ VIEWS.overview = function () {
             <h4 style="font-size:12.5px;font-weight:700">${_t("Recent Activity")}</h4>
           </div>
           ${activity.length ? `<div class="stack-sm">${activity.map(a => `<div class="row-between" style="align-items:flex-start;gap:6px">
-              <span class="mini truncate" style="color:var(--text-2);font-weight:500">${esc(a.text)}</span>
+              <span class="mini truncate" style="color:var(--text-2);font-weight:500">${esc(_sd(a.text))}</span>
               <span class="mini dim" style="white-space:nowrap">${esc(relTime(a.at))}</span></div>`).join("")}</div>`
             : `<p class="tiny dim" style="line-height:1.6">${_t("Your changes will show up here.")}</p>`}
           <div class="spacer"></div>
@@ -2708,23 +2742,23 @@ VIEWS.overview = function () {
         ${due.length ? `<div class="stack-sm" style="margin-bottom:14px">${due.map(c => `
           <div class="row-between" style="gap:8px">
             <span class="row" style="gap:8px;min-width:0"><span class="dot-sm" style="background:var(--primary)"></span>
-              <span class="truncate" style="font-size:12.5px;font-weight:600">${esc(c.name)}</span></span>
-            <button class="btn btn-ghost btn-sm" data-action="start-timer" data-min="${Number(c.timebox) || 15}" data-label="${esc(c.name)}"
+              <span class="truncate" style="font-size:12.5px;font-weight:600">${esc(_sd(c.name))}</span></span>
+            <button class="btn btn-ghost btn-sm" data-action="start-timer" data-min="${Number(c.timebox) || 15}" data-label="${esc(_sd(c.name))}"
               title="${_t("Start the timebox")}">${esc(fmtTimebox(c.timebox))}</button>
           </div>`).join("")}</div>`
           : `<p class="tiny dim" style="margin-bottom:14px;line-height:1.6">${_t("No event scheduled for today.")}</p>`}
         <div class="stat-row" style="padding-top:12px;border-top:1px solid var(--border)">
           <span>${_t("Daily Scrum")}</span>
-          <span class="v" style="color:${standup ? "var(--green)" : "var(--text-3)"}">${standup ? "recorded" : "not yet"}</span>
+          <span class="v" style="color:${standup ? "var(--green)" : "var(--text-3)"}">${standup ? _t("recorded") : _t("not yet")}</span>
         </div>
         <div class="stat-row" style="margin-top:9px">
           <span>${_t("Facilitator")}</span><span class="v">${esc(standup && standup.facilitator ? standup.facilitator : nextFacilitator() || "—")}</span>
         </div>
         <div class="stat-row" style="margin-top:9px">
           <span>${_t("Away today")}</span>
-          <span class="v" style="color:${away.length ? "var(--amber)" : "var(--text-2)"}">${away.length ? esc(away.map(m => m.name.split(" ")[0]).join(", ")) : "nobody"}</span>
+          <span class="v" style="color:${away.length ? "var(--amber)" : "var(--text-2)"}">${away.length ? esc(away.map(m => m.name.split(" ")[0]).join(", ")) : _t("nobody")}</span>
         </div>
-        <button class="btn btn-soft btn-block" style="margin-top:16px" data-action="open-standup">${ic("users", 14)}${standup ? "Continue standup" : "Run the standup"}</button>
+        <button class="btn btn-soft btn-block" style="margin-top:16px" data-action="open-standup">${ic("users", 14)}${standup ? _t("Continue standup") : _t("Run the standup")}</button>
       </div>
 
       <div class="card">
@@ -2750,7 +2784,7 @@ VIEWS.overview = function () {
           ${quickStat("layers", "var(--amber)", "Waiting in Refinement", S.refinement.items.length, "var(--amber)")}
           ${quickStat("history", "var(--primary-text)", "Retro actions open", openRetroActions().length, "var(--primary-text)")}
         </div>
-        <button class="btn btn-soft btn-block" style="margin-top:16px" data-action="go" data-view="sprints">${ic("chart", 14)}Open Sprint metrics</button>
+        <button class="btn btn-soft btn-block" style="margin-top:16px" data-action="go" data-view="sprints">${ic("chart", 14)}${_t("Open Sprint metrics")}</button>
       </div>
 
       <div class="card">
@@ -2762,12 +2796,12 @@ VIEWS.overview = function () {
             ? `<div class="stack-sm" style="gap:8px">${items.slice(0, 6).map(i => `
                 <div class="row" style="gap:8px;align-items:flex-start">
                   <span style="color:var(--green);margin-top:2px">${ic("check", 12, 3)}</span>
-                  <span class="tiny" style="line-height:1.5">${esc(i.text)}</span>
+                  <span class="tiny" style="line-height:1.5">${esc(_sd(i.text))}</span>
                 </div>`).join("")}
-              ${items.length > 6 ? `<p class="mini dim">+ ${items.length - 6} more</p>` : ""}</div>`
+              ${items.length > 6 ? `<p class="mini dim">${_tp("+ {n} more", { n: items.length - 6 })}</p>` : ""}</div>`
             : emptyState("clipboard", "Not written yet", "Agree what Done means before the next Review.", "", true);
         })()}
-        <button class="btn btn-soft btn-block" style="margin-top:16px" data-action="go" data-view="playbook">${ic("clipboard", 14)}Open Playbook</button>
+        <button class="btn btn-soft btn-block" style="margin-top:16px" data-action="go" data-view="playbook">${ic("clipboard", 14)}${_t("Open Playbook")}</button>
       </div>
     </div>
   </div>`;
@@ -2775,7 +2809,7 @@ VIEWS.overview = function () {
 
 
 function quickStat(icon, color, label, value, valueColor) {
-  return `<div class="stat-row"><span class="row" style="gap:10px"><span style="color:${color}">${ic(icon, 16, 2.2)}</span>${esc(label)}</span>
+  return `<div class="stat-row"><span class="row" style="gap:10px"><span style="color:${color}">${ic(icon, 16, 2.2)}</span>${esc(_t(label))}</span>
     <span class="v" style="color:${valueColor}">${value}</span></div>`;
 }
 function milestoneColor(m) {
@@ -2789,7 +2823,7 @@ VIEWS.taskboard = function () {
     return pageHead("Sprint Board", "Where the Sprint Backlog actually lives.") +
       `<div class="card">${emptyState("board", "No board yet",
         "Create the board. It starts with Backlog, To Do, In Progress, Review and Done — rename, recolour, WIP-limit or delete any of them afterwards.",
-        `<button class="btn btn-primary" data-action="new-board">${ic("plus", 14)}Create board</button>`)}</div>`;
+        `<button class="btn btn-primary" data-action="new-board">${ic("plus", 14)}${_t("Create board")}</button>`)}</div>`;
   }
   const st = boardStats(board);
   const sprint = activeSprint();
@@ -2801,13 +2835,13 @@ VIEWS.taskboard = function () {
   return `
   ${pageHead("Sprint Board", `${esc(board.name)} · ${pluralise(st.total, "card")} · ${st.done} finished${blocked ? " · " + blocked + " blocked" : ""}`, `
     ${boardSelector()}
-    <button class="btn btn-ghost" data-action="edit-board">${ic("edit", 13)}Edit board</button>
-    <button class="btn btn-ghost" data-action="new-board">${ic("plus", 13)}New board</button>
-    <button class="btn btn-primary" data-action="new-task">${ic("plus", 14)}New Task</button>`)}
+    <button class="btn btn-ghost" data-action="edit-board">${ic("edit", 13)}${_t("Edit board")}</button>
+    <button class="btn btn-ghost" data-action="new-board">${ic("plus", 13)}${_t("New board")}</button>
+    <button class="btn btn-primary" data-action="new-task">${ic("plus", 14)}${_t("New Task")}</button>`)}
 
   ${!tracksSprint(board)
     ? `<div class="notice" style="margin-bottom:18px">${ic("user", 16)}<span>
-        <b>${esc(board.name)}</b> is a private board — its cards stay out of the burndown, the velocity and the cycle time.
+        ${_tp("<b>{name}</b> is a private board — its cards stay out of the burndown, the velocity and the cycle time.", { name: esc(board.name) })}
         <button class="link" data-action="edit-board">${_t("Change that")}</button>.</span></div>`
     : sprint ? `<div class="notice info" style="margin-bottom:18px">${ic("refresh", 16)}<span>
         <b>${esc(sprint.name)}</b>${sprint.goal ? " — " + esc(sprint.goal) : ""} ·
@@ -2817,19 +2851,19 @@ VIEWS.taskboard = function () {
         <button class="link" data-action="go" data-view="sprints">${_t("Plan one")}</button>.</span></div>`}
 
   ${overWip.length ? `<div class="notice danger" style="margin-bottom:18px">${ic("alert", 16)}<span>
-    <b>${_t("Over the WIP limit:")}</b> ${overWip.map(c => esc(c.name) + " (" + board.tasks.filter(t => t.columnId === c.id).length + "/" + c.wip + ")").join(", ")}.
+    <b>${_t("Over the WIP limit:")}</b> ${overWip.map(c => esc(_sd(c.name)) + " (" + board.tasks.filter(t => t.columnId === c.id).length + "/" + c.wip + ")").join(", ")}.
     Finishing beats starting.</span></div>` : ""}
 
   <div class="card">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon">${ic("board", 18, 2.2)}</span>
-        <div><h3>${esc(board.name)}</h3><span class="sub">${esc(board.description || "Drag cards between columns, or use the arrows on a card.")}</span></div></div>
+        <div><h3>${esc(board.name)}</h3><span class="sub">${esc(board.description || _t("Drag cards between columns, or use the arrows on a card."))}</span></div></div>
       <div class="row">
-        ${blocked ? `<span class="badge b-high">${ic("alert", 11)}${blocked} blocked</span>` : ""}
-        ${stale ? `<span class="badge b-pending" title="Untouched for ${S.settings.staleCardDays || 3}+ days">${stale} stale</span>` : ""}
+        ${blocked ? `<span class="badge b-high">${ic("alert", 11)}${esc(_tp("{n} blocked", { n: blocked }))}</span>` : ""}
+        ${stale ? `<span class="badge b-pending" title="${esc(_tp("Untouched for {days}+ days", { days: S.settings.staleCardDays || 3 }))}">${esc(_tp("{n} stale", { n: stale }))}</span>` : ""}
         <div class="progress" style="width:120px"><span style="width:${st.percent}%"></span></div>
         <b class="tiny">${st.percent}%</b>
-        <button class="btn btn-ghost btn-sm" data-action="add-column">${ic("plus", 12)}Column</button>
+        <button class="btn btn-ghost btn-sm" data-action="add-column">${ic("plus", 12)}${_t("Column")}</button>
       </div>
     </div>
     ${kanbanHTML(board, false)}
@@ -2842,7 +2876,7 @@ function sprintStrip(sprint) {
   if (!sprint) {
     return `<div class="card">${emptyState("refresh", "No Sprint is running",
       "Plan a Sprint with a goal and dates. From then on the burndown, the day counter and the alerts all key off it.",
-      `<button class="btn btn-primary" data-action="new-sprint">${ic("plus", 14)}Plan a Sprint</button>`)}</div>`;
+      `<button class="btn btn-primary" data-action="new-sprint">${ic("plus", 14)}${_t("Plan a Sprint")}</button>`)}</div>`;
   }
   const st = sprintStats(sprint);
   const days = sprintDayList(sprint);
@@ -2864,8 +2898,8 @@ function sprintStrip(sprint) {
             <span class="tiny dim">${esc(fmtDate(sprint.start) || "no start")} → ${esc(fmtDate(sprint.end) || "no end")}</span></div>
         </div>
         <div class="row" style="gap:6px">
-          <button class="btn btn-ghost btn-sm" data-action="copy-sprint-summary" data-id="${sprint.id}" title="${_t("Copy a plain-text summary")}">${ic("copy", 12)}Summary</button>
-          <button class="btn btn-ghost btn-sm" data-action="edit-sprint" data-id="${sprint.id}">${ic("edit", 12)}Edit</button>
+          <button class="btn btn-ghost btn-sm" data-action="copy-sprint-summary" data-id="${sprint.id}" title="${_t("Copy a plain-text summary")}">${ic("copy", 12)}${_t("Summary")}</button>
+          <button class="btn btn-ghost btn-sm" data-action="edit-sprint" data-id="${sprint.id}">${ic("edit", 12)}${_t("Edit")}</button>
         </div>
       </div>
       ${sprint.goal ? `<p class="goal">${esc(sprint.goal)}</p>`
@@ -2936,7 +2970,7 @@ VIEWS.sprints = function () {
 
   return `
   ${pageHead("Sprints & Metrics", "How this Sprint is tracking, and what the last few say about the next one.", `
-    <button class="btn btn-primary" data-action="new-sprint">${ic("plus", 14)}New Sprint</button>`)}
+    <button class="btn btn-primary" data-action="new-sprint">${ic("plus", 14)}${_t("New Sprint")}</button>`)}
 
   ${sprintStrip(sprint)}
 
@@ -2944,8 +2978,8 @@ VIEWS.sprints = function () {
     <div class="card">
       <div class="card-head">
         <div class="card-title"><span class="tile-icon">${ic("chart", 18, 2.2)}</span>
-          <div><h3>${_t("Burndown")}</h3><span class="sub">${sprint ? "Recorded automatically each day you use the tool" : "No active Sprint"}</span></div></div>
-        ${sprint ? `<button class="btn btn-ghost btn-sm" data-action="edit-burndown" data-id="${sprint.id}">${ic("edit", 12)}Correct a day</button>` : ""}
+          <div><h3>${_t("Burndown")}</h3><span class="sub">${sprint ? _t("Recorded automatically each day you use the tool") : _t("No active Sprint")}</span></div></div>
+        ${sprint ? `<button class="btn btn-ghost btn-sm" data-action="edit-burndown" data-id="${sprint.id}">${ic("edit", 12)}${_t("Correct a day")}</button>` : ""}
       </div>
       ${sprint ? burndownSVG(sprint, false)
         : emptyState("chart", "Nothing to burn down", "Start a Sprint and this fills in on its own.", "", true)}
@@ -2954,33 +2988,32 @@ VIEWS.sprints = function () {
     <div class="card">
       <div class="card-head">
         <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("zap", 18, 2.2)}</span>
-          <div><h3>${_t("Velocity")}</h3><span class="sub">${recent.length ? pluralise(recent.length, "closed Sprint") : "No closed Sprints yet"}</span></div></div>
+          <div><h3>${_t("Velocity")}</h3><span class="sub">${recent.length ? pluralise(recent.length, "closed Sprint") : _t("No closed Sprints yet")}</span></div></div>
       </div>
       ${recent.length ? velocitySVG(recent)
         : emptyState("zap", "No velocity yet", "Close your first Sprint and a bar appears here. Three Sprints in, the average starts to mean something.", "", true)}
       ${recent.length && forecast ? `<p class="tiny muted" style="margin-top:10px;line-height:1.6">
-        At an average of <b>${avg}</b> per Sprint, the <b>${queue}</b> points sitting in Refinement are roughly
-        <b>${pluralise(forecast, "Sprint")}</b> of work.</p>` : ""}
+        ${_tp("At an average of <b>{avg}</b> per Sprint, the <b>{queue}</b> points sitting in Refinement are roughly <b>{forecast}</b> of work.", { avg: avg, queue: queue, forecast: pluralise(forecast, "Sprint") })}</p>` : ""}
     </div>
   </div>
 
   <div class="grid-4" style="margin-top:20px">
-    <div class="stat-tile"><b>${avg || "—"}</b><span>${_t("Avg velocity")}</span><p>Mean of the last ${Math.min(5, closed.length) || 0} closed Sprints.</p></div>
-    <div class="stat-tile"><b>${ct.avgDays || "—"}</b><span>${_t("Cycle time (days)")}</span><p>${ct.sample ? "Across " + pluralise(ct.sample, "finished item") + "." : "Move cards across the board and this fills in."}</p></div>
+    <div class="stat-tile"><b>${avg || "—"}</b><span>${_t("Avg velocity")}</span><p>${_tp("Mean of the last {n} closed Sprints.", { n: Math.min(5, closed.length) || 0 })}</p></div>
+    <div class="stat-tile"><b>${ct.avgDays || "—"}</b><span>${_t("Cycle time (days)")}</span><p>${ct.sample ? _tp("Across {items}.", { items: pluralise(ct.sample, "finished item") }) : _t("Move cards across the board and this fills in.")}</p></div>
     <div class="stat-tile"><b>${ct.throughput}</b><span>${_t("Done / 14 days")}</span><p>${_t("Items finished in the last two weeks.")}</p></div>
-    <div class="stat-tile"><b>${cap.available || "—"}</b><span>${_t("Person-days")}</span><p>${cap.people ? cap.lost + " lost to absence this Sprint." : "Add your team to see capacity."}</p></div>
+    <div class="stat-tile"><b>${cap.available || "—"}</b><span>${_t("Person-days")}</span><p>${cap.people ? _tp("{n} lost to absence this Sprint.", { n: cap.lost }) : _t("Add your team to see capacity.")}</p></div>
   </div>
 
   <div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon">${ic("list", 18, 2.2)}</span>
         <div><h3>${_t("All Sprints")}</h3><span class="sub">${esc(pluralise(all.length, "Sprint"))}</span></div></div>
-      <button class="btn btn-ghost btn-sm" data-action="new-sprint">${ic("plus", 12)}New Sprint</button>
+      <button class="btn btn-ghost btn-sm" data-action="new-sprint">${ic("plus", 12)}${_t("New Sprint")}</button>
     </div>
     ${all.length ? `<div class="stack-sm">${all.map(sprintRow).join("")}</div>`
       : emptyState("refresh", "No Sprints yet",
         "A Sprint here is the container everything else measures against — the burndown, the velocity, the capacity and the alerts.",
-        `<button class="btn btn-primary" data-action="new-sprint">${ic("plus", 14)}Plan your first Sprint</button>`)}
+        `<button class="btn btn-primary" data-action="new-sprint">${ic("plus", 14)}${_t("Plan your first Sprint")}</button>`)}
   </div>`;
 };
 
@@ -3004,30 +3037,30 @@ VIEWS.playbook = function () {
 
   return `
   ${pageHead("Playbook", "The agreements this team lives by, and the reference you would otherwise be googling mid-meeting.", `
-    <button class="btn btn-primary" data-action="new-agreement">${ic("plus", 14)}New Agreement</button>`)}
+    <button class="btn btn-primary" data-action="new-agreement">${ic("plus", 14)}${_t("New Agreement")}</button>`)}
 
   ${list.length ? `<div class="grid-2" style="align-items:start">${list.map(a => `
     <div class="card">
       <div class="card-head" style="margin-bottom:12px">
         <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("clipboard", 17, 2.2)}</span>
-          <div><h3>${esc(a.title)}</h3><span class="sub">${esc(_t(a.type || "Agreement"))} · ${esc(pluralise((a.items || []).length, "criterion", "criteria"))}</span></div></div>
+          <div><h3>${esc(_sd(a.title))}</h3><span class="sub">${esc(a.type ? _sd(a.type) : _t("Agreement"))} · ${esc(pluralise((a.items || []).length, "criterion", "criteria"))}</span></div></div>
         <div class="act">
           <button data-action="edit-agreement" data-id="${a.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
           <button class="del" data-action="delete-agreement" data-id="${a.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div>
       </div>
       ${(a.items || []).length ? `<div class="checklist">${(a.items || []).map((i, n) => `
-        <div><span class="n">${n + 1}</span><span>${esc(i.text)}</span></div>`).join("")}</div>`
+        <div><span class="n">${n + 1}</span><span>${esc(_sd(i.text))}</span></div>`).join("")}</div>`
         : `<p class="tiny dim">${_t("Nothing agreed yet — edit this to add the criteria.")}</p>`}
     </div>`).join("")}</div>`
     : `<div class="card">${emptyState("clipboard", "No agreements",
       "The Definition of Done, the Definition of Ready and how you work together. These are seeded on a fresh workspace — add them back if you cleared them.",
-      `<button class="btn btn-primary" data-action="new-agreement">${ic("plus", 14)}Write the first one</button>`)}</div>`}
+      `<button class="btn btn-primary" data-action="new-agreement">${ic("plus", 14)}${_t("Write the first one")}</button>`)}</div>`}
 
   <div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon">${ic("sparkle", 18, 2.2)}</span>
-        <div><h3>${_t("Facilitation techniques")}</h3><span class="sub">Pick one deliberately instead of running the same format for the ninth time</span></div></div>
+        <div><h3>${_t("Facilitation techniques")}</h3><span class="sub">${_t("Pick one deliberately instead of running the same format for the ninth time")}</span></div></div>
     </div>
     ${Object.keys(groups).map(g => `
       <div style="margin-bottom:16px">
@@ -3050,7 +3083,7 @@ VIEWS.playbook = function () {
       <div>
         <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${_t("The five events and their timeboxes")}</div>
         ${refTable(SCRUM_REF.events, ["Event", "Timebox", "Purpose"])}
-        <p class="mini dim" style="margin-top:8px">Timeboxes shown are the maximum for a one-month Sprint; shorter Sprints get proportionally shorter events.</p>
+        <p class="mini dim" style="margin-top:8px">${_t("Timeboxes shown are the maximum for a one-month Sprint; shorter Sprints get proportionally shorter events.")}</p>
       </div>
       <div>
         <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${_t("The three artifacts and their commitments")}</div>
@@ -3059,7 +3092,7 @@ VIEWS.playbook = function () {
       <div>
         <div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${_t("The five values")}</div>
         <div class="ref-grid">${SCRUM_REF.values.map(v => `
-          <div class="ref"><span class="k">${esc(v[0])}</span><p style="margin-top:4px">${esc(v[1])}</p></div>`).join("")}</div>
+          <div class="ref"><span class="k">${esc(_t(v[0]))}</span><p style="margin-top:4px">${esc(_t(v[1]))}</p></div>`).join("")}</div>
       </div>
     </div>
   </div>`;
@@ -3092,14 +3125,14 @@ VIEWS.team = function () {
 
   return `
   ${pageHead("Team", "Who is on the team, who is available, and how everybody is actually doing.", `
-    <button class="btn btn-ghost" data-action="new-health">${ic("smile", 13)}Health check</button>
-    <button class="btn btn-primary" data-action="new-member">${ic("plus", 14)}Add Member</button>`)}
+    <button class="btn btn-ghost" data-action="new-health">${ic("smile", 13)}${_t("Health check")}</button>
+    <button class="btn btn-primary" data-action="new-member">${ic("plus", 14)}${_t("Add Member")}</button>`)}
 
   <div class="grid-4" style="margin-bottom:20px">
-    <div class="stat-tile"><b>${S.team.items.length}</b><span>${_t("Members")}</span><p>${S.settings.teamName ? esc(S.settings.teamName) : "Everyone in the Scrum Team."}</p></div>
-    <div class="stat-tile" style="${away.length ? "border-color:var(--amber)" : ""}"><b>${away.length}</b><span>${_t("Away today")}</span><p>${away.length ? esc(away.map(m => m.name).join(", ")) : "Everyone is in."}</p></div>
-    <div class="stat-tile"><b>${cap.available || "—"}</b><span>${_t("Person-days")}</span><p>${sprint ? cap.lost + " lost to absence across " + pluralise(cap.days, "working day") + "." : "No Sprint running."}</p></div>
-    <div class="stat-tile"><b>${latestAvg || "—"}</b><span>${_t("Mood (1–5)")}</span><p>${latest ? "Checked " + fmtDate(latest.date) + "." : "No health check taken yet."}</p></div>
+    <div class="stat-tile"><b>${S.team.items.length}</b><span>${_t("Members")}</span><p>${S.settings.teamName ? esc(_sd(S.settings.teamName)) : _t("Everyone in the Scrum Team.")}</p></div>
+    <div class="stat-tile" style="${away.length ? "border-color:var(--amber)" : ""}"><b>${away.length}</b><span>${_t("Away today")}</span><p>${away.length ? esc(away.map(m => m.name).join(", ")) : _t("Everyone is in.")}</p></div>
+    <div class="stat-tile"><b>${cap.available || "—"}</b><span>${_t("Person-days")}</span><p>${sprint ? _tp("{n} lost to absence across {days}.", { n: cap.lost, days: pluralise(cap.days, "working day") }) : _t("No Sprint running.")}</p></div>
+    <div class="stat-tile"><b>${latestAvg || "—"}</b><span>${_t("Mood (1–5)")}</span><p>${latest ? _tp("Checked {date}.", { date: fmtDate(latest.date) }) : _t("No health check taken yet.")}</p></div>
   </div>
 
   ${list.length ? `<div class="grid-3">${list.map(m => {
@@ -3120,25 +3153,25 @@ VIEWS.team = function () {
           <button class="del" data-action="delete-member" data-id="${m.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
         </div>
       </div>
-      ${isOut ? `<span class="badge b-pending">${ic("calendar", 11)}Away today</span>` : ""}
+      ${isOut ? `<span class="badge b-pending">${ic("calendar", 11)}${_t("Away today")}</span>` : ""}
       <div>
         <div class="row-between mini dim" style="margin-bottom:4px"><span>${_t("Availability")}</span><b style="color:var(--text-2)">${pct}%</b></div>
         <div class="cap-bar"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
       </div>
       ${soon.length ? `<p class="mini dim">${ic("calendar", 11)} Next away ${esc(fmtShort(soon[0].from))}${soon[0].reason ? " · " + esc(soon[0].reason) : ""}</p>` : ""}
-      ${checks.length ? `<div><div class="mini dim" style="margin-bottom:4px">Mood over the last ${checks.length} ${checks.length === 1 ? "check" : "checks"}</div>${moodStrip(m.name, checks)}</div>` : ""}
+      ${checks.length ? `<div><div class="mini dim" style="margin-bottom:4px">${_tp("Mood over the last {checks}", { checks: pluralise(checks.length, "check") })}</div>${moodStrip(m.name, checks)}</div>` : ""}
       ${m.note ? `<p class="tiny muted" style="line-height:1.55">${esc(m.note)}</p>` : ""}
     </div>`;
   }).join("")}</div>`
     : `<div class="card">${emptyState("users", "No team yet",
       "Add everyone on the team. Their availability feeds the Sprint capacity, their absences show up in the Daily Scrum, and the standup rotation picks the next facilitator for you.",
-      `<button class="btn btn-primary" data-action="new-member">${ic("plus", 14)}Add the first member</button>`)}</div>`}
+      `<button class="btn btn-primary" data-action="new-member">${ic("plus", 14)}${_t("Add the first member")}</button>`)}</div>`}
 
   <div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("smile", 18, 2.2)}</span>
-        <div><h3>${_t("Team health")}</h3><span class="sub">${checks.length ? esc(pluralise(checks.length, "check")) + " recorded" : "Nothing recorded yet"}</span></div></div>
-      <button class="btn btn-ghost btn-sm" data-action="new-health">${ic("plus", 12)}New check</button>
+        <div><h3>${_t("Team health")}</h3><span class="sub">${checks.length ? esc(_tp("{checks} recorded", { checks: pluralise(checks.length, "check") })) : _t("Nothing recorded yet")}</span></div></div>
+      <button class="btn btn-ghost btn-sm" data-action="new-health">${ic("plus", 12)}${_t("New check")}</button>
     </div>
     ${checks.length ? `<div class="table-wrap"><table class="tbl">
       <thead><tr><th>${_t("Date")}</th><th>${_t("Average")}</th><th>${_t("Context")}</th><th>${_t("Low scores")}</th><th style="text-align:right">${_t("Actions")}</th></tr></thead>
@@ -3159,7 +3192,7 @@ VIEWS.team = function () {
       }).join("")}</tbody></table></div>`
       : emptyState("smile", "No health checks yet",
         "Ask everyone for a number out of five at the end of a Sprint. Two or three checks in, the trend tells you more than the numbers do.",
-        `<button class="btn btn-primary" data-action="new-health">${ic("plus", 14)}Take the first check</button>`, true)}
+        `<button class="btn btn-primary" data-action="new-health">${ic("plus", 14)}${_t("Take the first check")}</button>`, true)}
   </div>`;
 };
 
@@ -3179,7 +3212,7 @@ function ceremonyCard(c) {
   return `<div class="cer-card ${due ? "today" : ""}">
     <div class="row-between" style="align-items:flex-start">
       <div>
-        <h4>${esc(c.name)}</h4>
+        <h4>${esc(_sd(c.name))}</h4>
         <div class="row wrap" style="gap:6px;margin-top:6px">
           <span class="timebox">${ic("clock", 11, 2.6)}${esc(fmtTimebox(c.timebox))}</span>
           <span class="tag">${esc(cadenceLabel(c.cadence))}</span>
@@ -3192,19 +3225,19 @@ function ceremonyCard(c) {
         <button class="del" data-action="delete-ceremony" data-id="${c.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
       </div>
     </div>
-    ${c.purpose ? `<p class="tiny muted" style="line-height:1.6">${esc(c.purpose)}</p>` : ""}
+    ${c.purpose ? `<p class="tiny muted" style="line-height:1.6">${esc(_sd(c.purpose))}</p>` : ""}
     ${c.attendees ? `<p class="mini dim row" style="gap:5px">${ic("users", 12)}${esc(c.attendees)}</p>` : ""}
     ${agenda.length ? `<div class="agenda">${agenda.map((a, i) => `
       <label class="${a.done ? "done" : ""}">
         <input type="checkbox" data-action="toggle-agenda" data-id="${c.id}" data-index="${i}" ${a.done ? "checked" : ""}>
-        <span>${esc(a.text)}</span>
+        <span>${esc(_sd(a.text))}</span>
       </label>`).join("")}</div>` : `<p class="mini dim">${_t("No agenda yet — edit this event to add one.")}</p>`}
     <div class="spacer"></div>
     <div class="row" style="gap:6px;margin-top:4px">
-      <button class="btn btn-soft btn-sm grow" data-action="start-timer" data-min="${Number(c.timebox) || 15}" data-label="${esc(c.name)}">
-        ${ic("clock", 12)}Start timebox</button>
+      <button class="btn btn-soft btn-sm grow" data-action="start-timer" data-min="${Number(c.timebox) || 15}" data-label="${esc(_sd(c.name))}">
+        ${ic("clock", 12)}${_t("Start timebox")}</button>
       ${c.name.toLowerCase().indexOf("daily") >= 0 || c.name.toLowerCase().indexOf("standup") >= 0
-        ? `<button class="btn btn-primary btn-sm" data-action="open-standup">${ic("users", 12)}Run standup</button>` : ""}
+        ? `<button class="btn btn-primary btn-sm" data-action="open-standup">${ic("users", 12)}${_t("Run standup")}</button>` : ""}
       ${covered ? `<button class="btn btn-ghost btn-sm" data-action="reset-agenda" data-id="${c.id}" title="${_t("Untick every agenda point")}">${ic("refresh", 12)}${covered}/${agenda.length}</button>` : ""}
     </div>
   </div>`;
@@ -3222,26 +3255,26 @@ VIEWS.ceremonies = function () {
 
   return `
   ${pageHead("Ceremonies", "The five events, their timeboxes, and the agenda you facilitate from.", `
-    <button class="btn btn-ghost" data-action="start-timer" data-min="15" data-label="Timebox">${ic("clock", 13)}15-min timebox</button>
-    <button class="btn btn-primary" data-action="open-standup">${ic("users", 14)}${standupToday ? "Continue standup" : "Run today's standup"}</button>`)}
+    <button class="btn btn-ghost" data-action="start-timer" data-min="15" data-label="Timebox">${ic("clock", 13)}${_t("15-min timebox")}</button>
+    <button class="btn btn-primary" data-action="open-standup">${ic("users", 14)}${standupToday ? _t("Continue standup") : _t("Run today's standup")}</button>`)}
 
   ${due.length ? `<div class="notice info" style="margin-bottom:18px">${ic("clock", 16)}<span>
-    <b>${_t("Today:")}</b> ${due.map(c => esc(c.name) + " (" + esc(fmtTimebox(c.timebox)) + ")").join(" · ")}</span></div>` : ""}
+    <b>${_t("Today:")}</b> ${due.map(c => esc(_sd(c.name)) + " (" + esc(fmtTimebox(c.timebox)) + ")").join(" · ")}</span></div>` : ""}
 
   ${list.length ? `<div class="grid-3">${list.map(ceremonyCard).join("")}</div>`
     : `<div class="card">${emptyState("clock", "No events defined",
       "The five Scrum events are seeded on a fresh workspace. Add one back if you removed it.",
-      `<button class="btn btn-primary" data-action="new-ceremony">${ic("plus", 14)}Add an event</button>`)}</div>`}
+      `<button class="btn btn-primary" data-action="new-ceremony">${ic("plus", 14)}${_t("Add an event")}</button>`)}</div>`}
 
   <div style="text-align:center;margin:16px 0">
-    <button class="btn btn-ghost btn-sm" data-action="new-ceremony">${ic("plus", 12)}Add another event</button>
+    <button class="btn btn-ghost btn-sm" data-action="new-ceremony">${ic("plus", 12)}${_t("Add another event")}</button>
   </div>
 
   <div class="card">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--blue-weak);color:var(--blue)">${ic("users", 18, 2.2)}</span>
-        <div><h3>${_t("Daily Scrum log")}</h3><span class="sub">${standupToday ? "Today is recorded" : "Nothing recorded today"} · next facilitator: ${esc(nextFacilitator() || "—")}</span></div></div>
-      <button class="btn btn-primary btn-sm" data-action="open-standup">${ic(standupToday ? "edit" : "plus", 12)}${standupToday ? "Edit today" : "Record today"}</button>
+        <div><h3>${_t("Daily Scrum log")}</h3><span class="sub">${standupToday ? _t("Today is recorded") : _t("Nothing recorded today")} · ${_tp("next facilitator: {name}", { name: nextFacilitator() || "—" })}</span></div></div>
+      <button class="btn btn-primary btn-sm" data-action="open-standup">${ic(standupToday ? "edit" : "plus", 12)}${standupToday ? _t("Edit today") : _t("Record today")}</button>
     </div>
     ${recent.length ? `<div class="stack-sm">${recent.map(s => {
       const entries = s.entries || [];
@@ -3256,11 +3289,11 @@ VIEWS.ceremonies = function () {
               ${s.facilitator ? `<span class="tag">${esc(s.facilitator)}</span>` : ""}
             </div>
           </div>
-          <p class="mini dim">${esc(pluralise(entries.length, "person"))} spoke${s.absent ? " · absent: " + esc(s.absent) : ""}${(s.parkingLot || []).length ? " · " + pluralise((s.parkingLot || []).length, "parked topic") : ""}</p>
+          <p class="mini dim">${esc(pluralise(entries.length, "person", "people"))} spoke${s.absent ? " · absent: " + esc(s.absent) : ""}${(s.parkingLot || []).length ? " · " + pluralise((s.parkingLot || []).length, "parked topic") : ""}</p>
           ${blockers.length ? `<div class="stack-sm" style="margin-top:8px">${blockers.map((b, i) => `
             <div class="row-between" style="gap:8px">
               <span class="mini" style="color:var(--text-2)"><b>${esc(b.person || "Someone")}:</b> ${esc(b.blocker)}</span>
-              <button class="btn btn-danger-soft btn-sm" data-action="blocker-to-impediment" data-id="${s.id}" data-index="${entries.indexOf(b)}">${ic("alert", 11)}Raise</button>
+              <button class="btn btn-danger-soft btn-sm" data-action="blocker-to-impediment" data-id="${s.id}" data-index="${entries.indexOf(b)}">${ic("alert", 11)}${_t("Raise")}</button>
             </div>`).join("")}</div>` : ""}
         </div>
         <div class="act">
@@ -3271,7 +3304,7 @@ VIEWS.ceremonies = function () {
     }).join("")}</div>`
       : emptyState("users", "No standups recorded",
         "Record the Daily Scrum and you get a searchable history: who was there, what was blocked, and what you promised to take offline.",
-        `<button class="btn btn-primary" data-action="open-standup">${ic("plus", 14)}Record today's standup</button>`)}
+        `<button class="btn btn-primary" data-action="open-standup">${ic("plus", 14)}${_t("Record today's standup")}</button>`)}
   </div>`;
 };
 
@@ -3280,13 +3313,15 @@ function ageBadge(imp) {
   const age = impedimentAge(imp);
   const limit = Number(S.settings.impedimentAgeAlertDays) || 3;
   const cls = imp.status === "resolved" ? "" : (age >= limit * 2 ? " bad" : age >= limit ? " warn" : "");
-  const word = imp.status === "resolved" ? "cleared in " + pluralise(age, "day") : pluralise(age, "day") + " open";
+  const word = imp.status === "resolved"
+    ? _tp("cleared in {days}", { days: pluralise(age, "day") })
+    : _tp("{days} open", { days: pluralise(age, "day") });
   return `<span class="age${cls}" title="Raised ${esc(fmtDate(imp.raisedOn))}">${esc(word)}</span>`;
 }
 
 function impedimentRow(i) {
   const resolved = i.status === "resolved";
-  const label = { open: "Open", "in-progress": "Being worked", escalated: "Escalated", resolved: "Resolved" }[i.status || "open"];
+  const label = { open: _t("Open"), "in-progress": _t("Being worked"), escalated: _t("Escalated"), resolved: _t("Resolved") }[i.status || "open"];
   const cls = { open: "b-high", "in-progress": "b-pending", escalated: "b-critical", resolved: "b-done" }[i.status || "open"];
   return `<div class="item imp ${resolved ? "resolved" : ""}" data-sev="${esc(i.severity || "low")}">
     <div class="grow">
@@ -3301,7 +3336,7 @@ function impedimentRow(i) {
       ${resolved && i.resolution ? `<p style="color:var(--green)">${ic("check", 11, 3)} ${esc(i.resolution)}</p>` : ""}
       <div class="row wrap" style="gap:12px;margin-top:7px">
         ${i.owner ? `<span class="mini dim row" style="gap:5px">${avatar(i.owner)}${esc(i.owner)}</span>`
-          : `<span class="mini" style="color:var(--orange);font-weight:700">${ic("alert", 11, 2.4)} nobody is chasing this</span>`}
+          : `<span class="mini" style="color:var(--orange);font-weight:700">${ic("alert", 11, 2.4)} ${_t("nobody is chasing this")}</span>`}
         ${i.raisedBy ? `<span class="mini dim">raised by ${esc(i.raisedBy)}</span>` : ""}
         ${i.escalatedTo ? `<span class="mini dim row" style="gap:5px">${ic("arrowR", 11)}${esc(i.escalatedTo)}</span>` : ""}
         ${(i.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}
@@ -3335,34 +3370,34 @@ VIEWS.impediments = function () {
     <select class="sel sel-auto" data-action="set-impediment-status">
       ${["all", "open", "in-progress", "escalated", "resolved"].map(s =>
         `<option value="${s}" ${(ui.impedimentStatus || "all") === s ? "selected" : ""}>${
-          { all: "All", open: "Open", "in-progress": "Being worked", escalated: "Escalated", resolved: "Resolved" }[s]} (${counts[s] || 0})</option>`).join("")}
+          { all: _t("All"), open: _t("Open"), "in-progress": _t("Being worked"), escalated: _t("Escalated"), resolved: _t("Resolved") }[s]} (${counts[s] || 0})</option>`).join("")}
     </select>
-    <button class="btn btn-primary" data-action="new-impediment">${ic("plus", 14)}Raise Impediment</button>`)}
+    <button class="btn btn-primary" data-action="new-impediment">${ic("plus", 14)}${_t("Raise Impediment")}</button>`)}
 
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-tile"><b>${counts.open + counts["in-progress"] + counts.escalated}</b><span>${_t("Still in the way")}</span><p>${_t("Across every status that is not resolved.")}</p></div>
-    <div class="stat-tile" style="${aged.length ? "border-color:var(--red)" : ""}"><b style="${aged.length ? "color:var(--red)" : ""}">${aged.length}</b><span>${_t("Aging")}</span><p>Open ${S.settings.impedimentAgeAlertDays || 3}+ days. These need escalating.</p></div>
+    <div class="stat-tile" style="${aged.length ? "border-color:var(--red)" : ""}"><b style="${aged.length ? "color:var(--red)" : ""}">${aged.length}</b><span>${_t("Aging")}</span><p>${_tp("Open {n}+ days. These need escalating.", { n: S.settings.impedimentAgeAlertDays || 3 })}</p></div>
     <div class="stat-tile"><b>${counts.escalated}</b><span>${_t("Escalated")}</span><p>${_t("Handed to someone outside the team.")}</p></div>
-    <div class="stat-tile"><b>${avgClear || "—"}</b><span>${_t("Avg days to clear")}</span><p>${cleared.length ? "Across " + pluralise(cleared.length, "resolved impediment") + "." : "Nothing resolved yet."}</p></div>
+    <div class="stat-tile"><b>${avgClear || "—"}</b><span>${_t("Avg days to clear")}</span><p>${cleared.length ? _tp("Across {items}.", { items: pluralise(cleared.length, "resolved impediment") }) : _t("Nothing resolved yet.")}</p></div>
   </div>
 
   <div class="card">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--red-weak);color:var(--red)">${ic("alert", 18, 2.2)}</span>
-        <div><h3>${_t("In the way now")}</h3><span class="sub">${open.length ? esc(pluralise(open.length, "impediment")) : "Nothing blocking — enjoy it"}</span></div></div>
+        <div><h3>${_t("In the way now")}</h3><span class="sub">${open.length ? esc(pluralise(open.length, "impediment")) : _t("Nothing blocking — enjoy it")}</span></div></div>
     </div>
     ${open.length ? `<div class="stack-sm">${open.map(impedimentRow).join("")}</div>`
       : S.impediments.items.length
         ? emptyState("checkCircle", "Nothing open", "Every impediment on the register has been cleared.", "", true)
         : emptyState("alert", "No impediments raised",
           "Raise one the moment something stalls the team. The age counter is the point — it is what turns a quiet blocker into a conversation with management.",
-          `<button class="btn btn-primary" data-action="new-impediment">${ic("plus", 14)}Raise your first impediment</button>`)}
+          `<button class="btn btn-primary" data-action="new-impediment">${ic("plus", 14)}${_t("Raise your first impediment")}</button>`)}
   </div>
 
   ${resolved.length ? `<div class="card" style="margin-top:20px">
     <div class="card-head">
       <div class="card-title"><span class="tile-icon" style="background:var(--green-weak);color:var(--green)">${ic("checkCircle", 18, 2.2)}</span>
-        <div><h3>${_t("Cleared")}</h3><span class="sub">${esc(pluralise(resolved.length, "impediment"))} · kept because the same wall comes back</span></div></div>
+        <div><h3>${_t("Cleared")}</h3><span class="sub">${esc(pluralise(resolved.length, "impediment"))} · ${_t("kept because the same wall comes back")}</span></div></div>
     </div>
     <div class="stack-sm">${resolved.slice(0, 25).map(impedimentRow).join("")}</div>
   </div>` : ""}`;
@@ -3405,9 +3440,9 @@ VIEWS.decisions = function () {
   ${pageHead("Decision Log", "The record of what was decided, by whom, and — most importantly — why.", `
     <select class="sel sel-auto" data-action="set-decision-status">
       ${["all", "proposed", "pending", "approved", "rejected", "superseded"].map(s =>
-        `<option value="${s}" ${ui.decisionStatus === s ? "selected" : ""}>${s === "all" ? "All status" : s[0].toUpperCase() + s.slice(1)} (${counts[s] || 0})</option>`).join("")}
+        `<option value="${s}" ${ui.decisionStatus === s ? "selected" : ""}>${s === "all" ? _t("All status") : vlabel("status", s)} (${counts[s] || 0})</option>`).join("")}
     </select>
-    <button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}New Decision</button>`)}
+    <button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}${_t("New Decision")}</button>`)}
 
   <div class="card">
     ${list.length ? decisionTable(list, false)
@@ -3415,7 +3450,7 @@ VIEWS.decisions = function () {
         ? emptyState("search", "No decisions match", "Try a different filter or clear the search box.")
         : emptyState("scale", "Nothing decided yet",
           "Log a decision the moment you make it: the problem, the options you turned down, the reason you chose this one. Six months from now that context is the whole point.",
-          `<button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}Log your first decision</button>`)}
+          `<button class="btn btn-primary" data-action="new-decision">${ic("plus", 14)}${_t("Log your first decision")}</button>`)}
   </div>`;
 };
 
@@ -3432,7 +3467,7 @@ VIEWS.roadmap = function () {
 
   return `
   ${pageHead("Releases", "The dates outside the Sprint that the team is working towards, grouped by quarter.", `
-    <button class="btn btn-primary" data-action="new-milestone">${ic("plus", 14)}New Release</button>`)}
+    <button class="btn btn-primary" data-action="new-milestone">${ic("plus", 14)}${_t("New Release")}</button>`)}
   ${keys.length ? keys.map(k => `
     <div class="card" style="margin-bottom:16px">
       <div class="card-head" style="margin-bottom:12px">
@@ -3455,7 +3490,7 @@ VIEWS.roadmap = function () {
             ${m.notes ? `<p>${esc(m.notes)}</p>` : ""}
             <div class="row" style="gap:12px;margin-top:7px">
               <span class="mini dim row" style="gap:5px">${ic("calendar", 12)}${esc(fmtDate(m.date) || "No date")}</span>
-              ${d !== null ? `<span class="mini ${late ? "" : "dim"}" style="${late ? "color:var(--red);font-weight:700" : ""}">${late ? Math.abs(d) + " days late" : d === 0 ? "Today" : "in " + d + " days"}</span>` : ""}
+              ${d !== null ? `<span class="mini ${late ? "" : "dim"}" style="${late ? "color:var(--red);font-weight:700" : ""}">${late ? _tp("{days} late", { days: pluralise(Math.abs(d), "day") }) : d === 0 ? _t("Today") : _tp("in {days}", { days: pluralise(d, "day") })}</span>` : ""}
               ${m.owner ? `<span class="mini dim row" style="gap:5px">${avatar(m.owner)}${esc(m.owner)}</span>` : ""}
             </div>
           </div>
@@ -3468,7 +3503,7 @@ VIEWS.roadmap = function () {
     </div>`).join("")
     : `<div class="card">${emptyState("flag", "No releases yet",
         "Add the dates outside the Sprint that the team is steering towards — a release, an audit, a hard external deadline.",
-        `<button class="btn btn-primary" data-action="new-milestone">${ic("plus", 14)}Add your first release</button>`)}</div>`}`;
+        `<button class="btn btn-primary" data-action="new-milestone">${ic("plus", 14)}${_t("Add your first release")}</button>`)}</div>`}`;
 };
 
 /* -------------------------------------------------------------- REFINEMENT */
@@ -3485,13 +3520,13 @@ VIEWS.refinement = function () {
 
   return `
   ${pageHead("Refinement", "The queue waiting for Sprint Planning. Drag to re-rank; check each one against the Definition of Ready.", `
-    <button class="btn btn-primary" data-action="new-refinement">${ic("plus", 14)}New Item</button>`)}
+    <button class="btn btn-primary" data-action="new-refinement">${ic("plus", 14)}${_t("New Item")}</button>`)}
 
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-tile"><b>${S.refinement.items.length}</b><span>${_t("In the queue")}</span><p>${_t("Not yet pulled into a Sprint.")}</p></div>
-    <div class="stat-tile"><b>${ready}</b><span>${_t("Ready")}</span><p>${criteria.length ? "Meet all " + criteria.length + " Definition-of-Ready criteria." : "Write a Definition of Ready in the Playbook."}</p></div>
-    <div class="stat-tile"><b>${points || "—"}</b><span>${_t("Points queued")}</span><p>${avg ? "Roughly " + pluralise(Math.ceil(points / avg), "Sprint") + " at the current average." : "Estimate items to forecast."}</p></div>
-    <div class="stat-tile"><b>${sprint ? "Yes" : "No"}</b><span>${_t("Sprint to pull into")}</span><p>${sprint ? esc(sprint.name) + " is running." : "Start a Sprint before pulling items in."}</p></div>
+    <div class="stat-tile"><b>${ready}</b><span>${_t("Ready")}</span><p>${criteria.length ? _tp("Meet all {n} Definition-of-Ready criteria.", { n: criteria.length }) : _t("Write a Definition of Ready in the Playbook.")}</p></div>
+    <div class="stat-tile"><b>${points || "—"}</b><span>${_t("Points queued")}</span><p>${avg ? _tp("Roughly {sprints} at the current average.", { sprints: pluralise(Math.ceil(points / avg), "Sprint") }) : _t("Estimate items to forecast.")}</p></div>
+    <div class="stat-tile"><b>${sprint ? "Yes" : "No"}</b><span>${_t("Sprint to pull into")}</span><p>${sprint ? esc(_tp("{name} is running.", { name: sprint.name })) : _t("Start a Sprint before pulling items in.")}</p></div>
   </div>
 
   <div class="card">
@@ -3506,7 +3541,7 @@ VIEWS.refinement = function () {
               ${b.value ? `<span class="badge b-low" title="${_t("Business value")}">Value ${b.value}</span>` : ""}
               ${b.points ? `<span class="badge b-neutral" title="${_t("Story points")}">${b.points} pts</span>` : `<span class="badge b-pending" title="${_t("Not estimated")}">${_t("Not sized")}</span>`}
               ${criteria.length ? (dor.ready
-                ? `<span class="badge b-approved">${ic("check", 11, 3)}Ready</span>`
+                ? `<span class="badge b-approved">${ic("check", 11, 3)}${_t("Ready")}</span>`
                 : `<span class="badge b-pending" title="${_t("Definition of Ready")}">${dor.met}/${dor.total} ready</span>`) : ""}
             </div>
           </div>
@@ -3521,7 +3556,7 @@ VIEWS.refinement = function () {
     }).join("")}</div>`
       : emptyState("layers", "Nothing waiting",
         "Park work here before it is ready for a Sprint. Size it, walk it through the Definition of Ready, then pull it into the Sprint at Planning.",
-        `<button class="btn btn-primary" data-action="new-refinement">${ic("plus", 14)}Add your first item</button>`)}
+        `<button class="btn btn-primary" data-action="new-refinement">${ic("plus", 14)}${_t("Add your first item")}</button>`)}
   </div>`;
 };
 
@@ -3534,7 +3569,7 @@ VIEWS.notes = function () {
 
   return `
   ${pageHead("Notes & Reminders", "Quick thoughts, follow-ups and things you must not forget.", `
-    <button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}New Note</button>`)}
+    <button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}${_t("New Note")}</button>`)}
   ${list.length ? `<div class="grid-3">${list.map(n => {
     const d = n.remindAt ? daysUntil(n.remindAt) : null;
     const due = d !== null && d <= 0;
@@ -3553,7 +3588,7 @@ VIEWS.notes = function () {
   }).join("")}</div>`
     : `<div class="card">${emptyState("note", "No notes yet",
       "Jot down anything you would otherwise lose in a chat thread. Add a reminder date and it will show up in your alerts.",
-      `<button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}Write your first note</button>`)}</div>`}`;
+      `<button class="btn btn-primary" data-action="new-note">${ic("plus", 14)}${_t("Write your first note")}</button>`)}</div>`}`;
 };
 
 /* --------------------------------------------------------------- DOCUMENTS */
@@ -3565,7 +3600,7 @@ VIEWS.documents = function () {
 
   return `
   ${pageHead("Documents", "A register of where the important documents actually live.", `
-    <button class="btn btn-primary" data-action="new-document">${ic("plus", 14)}Add Document</button>`)}
+    <button class="btn btn-primary" data-action="new-document">${ic("plus", 14)}${_t("Add Document")}</button>`)}
   <div class="card">
     ${list.length ? `<div class="table-wrap"><table class="tbl">
       <thead><tr><th>${_t("Document")}</th><th>${_t("Type")}</th><th>${_t("Owner")}</th><th>${_t("Location")}</th><th>${_t("Updated")}</th><th style="text-align:right">${_t("Actions")}</th></tr></thead>
@@ -3582,7 +3617,7 @@ VIEWS.documents = function () {
         </div></td></tr>`).join("")}</tbody></table></div>`
       : emptyState("doc", "No documents registered",
         "Link the PRD, the designs, the analytics dashboard — anything you keep hunting for. Links only; nothing is uploaded.",
-        `<button class="btn btn-primary" data-action="new-document">${ic("plus", 14)}Add your first link</button>`)}
+        `<button class="btn btn-primary" data-action="new-document">${ic("plus", 14)}${_t("Add your first link")}</button>`)}
   </div>`;
 };
 
@@ -3597,11 +3632,11 @@ VIEWS.retrospective = function () {
 
   return `
   ${pageHead("Retrospective", "What went well, what did not, and what you are actually going to do about it.", `
-    <button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}New Session</button>`)}
+    <button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}${_t("New Session")}</button>`)}
 
   ${list.length ? `<div class="grid-4" style="margin-bottom:20px">
     <div class="stat-tile"><b>${list.length}</b><span>${_t("Sessions")}</span><p>${_t("Held and recorded.")}</p></div>
-    <div class="stat-tile" style="${open.length ? "border-color:var(--amber)" : ""}"><b>${open.length}</b><span>${_t("Actions open")}</span><p>${open.length ? "Chase these before the next session." : "Nothing outstanding."}</p></div>
+    <div class="stat-tile" style="${open.length ? "border-color:var(--amber)" : ""}"><b>${open.length}</b><span>${_t("Actions open")}</span><p>${open.length ? _t("Chase these before the next session.") : _t("Nothing outstanding.")}</p></div>
     <div class="stat-tile"><b>${(() => { const all = list.reduce((a, r) => a + (r.actions || []).length, 0); const d = list.reduce((a, r) => a + (r.actions || []).filter(x => x.done).length, 0); return all ? Math.round(d / all * 100) + "%" : "—"; })()}</b><span>${_t("Actions completed")}</span><p>${_t("Across every retro on record.")}</p></div>
     <div class="stat-tile"><b style="font-size:13px;line-height:1.4">${esc(lastFormat || "—")}</b><span>${_t("Last format")}</span><p>${_tp("Vary it — the Playbook has {n} to pick from.", { n: TECHNIQUES.filter(t => t.group === "Retrospective formats").length })}</p></div>
   </div>` : ""}
@@ -3613,7 +3648,7 @@ VIEWS.retrospective = function () {
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-head">
         <div class="card-title"><span class="tile-icon" style="background:var(--blue-weak);color:var(--blue)">${ic("history", 17, 2.2)}</span>
-          <div><h3>${esc(r.title)}</h3><span class="sub">${esc(fmtDate(r.date))}${sprint ? " · " + esc(sprint.name) : ""}${r.format ? " · " + esc(r.format) : ""}${actions.length ? " · " + doneCount + "/" + actions.length + " actions done" : ""}</span></div></div>
+          <div><h3>${esc(r.title)}</h3><span class="sub">${esc(fmtDate(r.date))}${sprint ? " · " + esc(sprint.name) : ""}${r.format ? " · " + esc(r.format) : ""}${actions.length ? " · " + _tp("{done}/{total} actions done", { done: doneCount, total: actions.length }) : ""}</span></div></div>
         <div class="act">
           <button data-action="edit-retro" data-id="${r.id}" title="${_t("Edit")}">${ic("edit", 14)}</button>
           <button class="del" data-action="delete-retro" data-id="${r.id}" title="${_t("Delete")}">${ic("trash", 14)}</button>
@@ -3621,17 +3656,17 @@ VIEWS.retrospective = function () {
       </div>
       <div class="grid-3">
         <div class="retro-col">
-          <h5 style="color:var(--green)">${ic("smile", 14)}Went well</h5>
+          <h5 style="color:var(--green)">${ic("smile", 14)}${_t("Went well")}</h5>
           ${(r.well || []).length ? (r.well || []).map(x => `<div class="retro-line"><span class="grow">${esc(x.text || x)}</span></div>`).join("")
             : '<p class="mini dim">' + esc(_t("Nothing recorded.")) + '</p>'}
         </div>
         <div class="retro-col">
-          <h5 style="color:var(--red)">${ic("frown", 14)}Went wrong</h5>
+          <h5 style="color:var(--red)">${ic("frown", 14)}${_t("Went wrong")}</h5>
           ${(r.wrong || []).length ? (r.wrong || []).map(x => `<div class="retro-line"><span class="grow">${esc(x.text || x)}</span></div>`).join("")
             : '<p class="mini dim">' + esc(_t("Nothing recorded.")) + '</p>'}
         </div>
         <div class="retro-col">
-          <h5 style="color:var(--primary-text)">${ic("bolt", 14)}Action items</h5>
+          <h5 style="color:var(--primary-text)">${ic("bolt", 14)}${_t("Action items")}</h5>
           ${actions.length ? actions.map((a, i) => `<div class="retro-line">
               <input type="checkbox" data-action="toggle-retro-action" data-id="${r.id}" data-index="${i}" ${a.done ? "checked" : ""}
                 style="width:14px;height:14px;accent-color:var(--primary);margin-top:2px">
@@ -3645,7 +3680,7 @@ VIEWS.retrospective = function () {
   }).join("")
     : `<div class="card">${emptyState("history", "No retrospectives yet",
       "Record each session so patterns become visible over time — and so action items do not quietly disappear.",
-      `<button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}Start your first retro</button>`)}</div>`}`;
+      `<button class="btn btn-primary" data-action="new-retro">${ic("plus", 14)}${_t("Start your first retro")}</button>`)}</div>`}`;
 };
 
 /* ---------------------------------------------------------------- SETTINGS */
@@ -3675,7 +3710,7 @@ VIEWS.settings = function () {
             <input class="inp" id="setTeam" data-setting="teamName" value="${esc(S.settings.teamName || "")}" placeholder="e.g. Team Honeycomb">
             <span class="hint">${_t("Shown under the greeting in the header.")}</span></div>
           <div class="field full"><label for="setWs">${_t("Workspace name")}</label>
-            <input class="inp" id="setWs" data-setting="workspaceName" value="${esc(S.settings.workspaceName || "")}" placeholder="e.g. Platform 2026"></div>
+            <input class="inp" id="setWs" data-setting="workspaceName" value="${esc(S.settings.workspaceName || "")}" placeholder="${_t("e.g. Platform 2026")}"></div>
         </div>
       </div>
 
@@ -3690,7 +3725,7 @@ VIEWS.settings = function () {
             <span class="hint">${_t("Older open impediments turn red and enter your alerts.")}</span></div>
           <div class="field"><label for="setStale">${_t("Stale card after (days)")}</label>
             <input class="inp" type="number" min="0" max="60" id="setStale" data-setting="staleCardDays" value="${esc(String(S.settings.staleCardDays === 0 ? 0 : S.settings.staleCardDays || 3))}">
-            <span class="hint">A card untouched this long gets a clock on the board. Set 0 to switch it off.</span></div>
+            <span class="hint">${_t("A card untouched this long gets a clock on the board. Set 0 to switch it off.")}</span></div>
           <div class="field"><label>${_t("Keyboard shortcuts")}</label>
             <button class="btn btn-ghost btn-block" data-action="show-shortcuts">${ic("zap", 13)}${_t("Show the list")}</button>
             <span class="hint">${_t("Or press <kbd>?</kbd> anywhere.")}</span></div>
@@ -3701,7 +3736,7 @@ VIEWS.settings = function () {
         <div class="side-head"><span class="ic">${ic("sun", 18, 2.2)}</span><h3>${_t("Appearance")}</h3></div>
         <div class="set-row">
           <div><div class="lbl">${_t("Theme")}</div>
-            <div class="desc">“System” follows your Windows light/dark setting. Your choice is saved with the workspace.</div></div>
+            <div class="desc">${_t("“System” follows your Windows light/dark setting. Your choice is saved with the workspace.")}</div></div>
           <div class="seg">
             <button data-action="set-theme" data-theme="light" class="${theme === "light" ? "on" : ""}">${ic("sun", 13)} ${_t("Light")}</button>
             <button data-action="set-theme" data-theme="dark" class="${theme === "dark" ? "on" : ""}">${ic("moon", 13)} ${_t("Dark")}</button>
@@ -3725,23 +3760,23 @@ VIEWS.settings = function () {
         <div class="set-row">
           <div><div class="lbl row" style="gap:8px">${ic(folder ? "folder" : "browser", 15)} ${esc(Store.location())}</div>
             <div class="desc">${folder
-              ? "Each section is a separate JSON file in that folder. A change saves that one file — the rest are left alone."
-              : "Saved in this browser's local storage. Clearing site data for this page deletes the workspace, so keep a backup copy."}</div></div>
+              ? _t("Each section is a separate JSON file in that folder. A change saves that one file — the rest are left alone.")
+              : _t("Saved in this browser's local storage. Clearing site data for this page deletes the workspace, so keep a backup copy.")}</div></div>
           <div id="saveState" class="row tiny bold" style="gap:5px;color:var(--green)">${ic("checkCircle", 13)}<span>${_t("Saved")}</span></div>
         </div>
         <div class="set-row">
           <div><div class="lbl">${_t("Switch storage location")}</div>
-            <div class="desc">Everything you have now is copied to the new location. ${folder ? "" : "Folder storage needs Chrome or Edge."}</div></div>
+            <div class="desc">${_t("Everything you have now is copied to the new location.")} ${folder ? "" : _t("Folder storage needs Chrome or Edge.")}</div></div>
           ${folder
-            ? `<button class="btn btn-ghost" data-action="switch-to-local">${ic("browser", 14)}Use this browser</button>`
-            : `<button class="btn btn-ghost" data-action="switch-to-folder" ${Store.folderSupported() ? "" : "disabled"}>${ic("folder", 14)}Choose a folder</button>`}
+            ? `<button class="btn btn-ghost" data-action="switch-to-local">${ic("browser", 14)}${_t("Use this browser")}</button>`
+            : `<button class="btn btn-ghost" data-action="switch-to-folder" ${Store.folderSupported() ? "" : "disabled"}>${ic("folder", 14)}${_t("Choose a folder")}</button>`}
         </div>
         <div class="set-row">
           <div><div class="lbl">${_t("Backup copy")}</div>
-            <div class="desc">Download the whole workspace as one JSON file, or restore one you saved earlier. Importing merges by id and never deletes what it does not recognise.</div></div>
+            <div class="desc">${_t("Download the whole workspace as one JSON file, or restore one you saved earlier. Importing merges by id and never deletes what it does not recognise.")}</div></div>
           <div class="row">
-            <button class="btn btn-ghost" data-action="export-all">${ic("download", 14)}Export</button>
-            <button class="btn btn-ghost" data-action="import-all">${ic("upload", 14)}Import</button>
+            <button class="btn btn-ghost" data-action="export-all">${ic("download", 14)}${_t("Export")}</button>
+            <button class="btn btn-ghost" data-action="import-all">${ic("upload", 14)}${_t("Import")}</button>
           </div>
         </div>
       </div>
@@ -3754,10 +3789,10 @@ VIEWS.settings = function () {
              ["ceremonies", "Events", "clock"], ["agreements", "Agreements", "clipboard"], ["decisions", "Decisions", "scale"],
              ["refinement", "Refinement items", "layers"], ["retrospectives", "Retrospectives", "history"],
              ["roadmap", "Releases", "flag"], ["notes", "Notes", "note"], ["documents", "Documents", "doc"], ["risks", "Risks", "alert"]]
-            .map(([k, label, icon]) => `<div class="stat-row"><span class="row" style="gap:10px">${ic(icon, 15)}${label}</span>
+            .map(([k, label, icon]) => `<div class="stat-row"><span class="row" style="gap:10px">${ic(icon, 15)}${_t(label)}</span>
               <span class="v">${S[k].items.length}</span></div>`).join("")}
           <div class="stat-row" style="padding-top:9px;border-top:1px solid var(--border)">
-            <span class="row" style="gap:10px">${ic("clock", 15)}Created</span>
+            <span class="row" style="gap:10px">${ic("clock", 15)}${_t("Created")}</span>
             <span class="v" style="font-size:12px;font-weight:600">${esc(fmtDate(S.settings.createdAt))}</span></div>
         </div>
       </div>
@@ -3765,8 +3800,8 @@ VIEWS.settings = function () {
       <div class="danger-zone">
         <div class="row" style="gap:9px;margin-bottom:8px;color:var(--red)">${ic("alert", 17)}<b style="font-size:13.5px">${_t("Danger zone")}</b></div>
         <p class="tiny muted" style="line-height:1.6;margin-bottom:14px">
-          Deletes every Sprint, board, impediment, standup, agreement, decision and note in this workspace${folder ? ", including the JSON files in your folder" : ""}. There is no undo.</p>
-        <button class="btn btn-danger" data-action="reset-workspace">${ic("trash", 14)}Reset this workspace</button>
+          ${_t("Deletes every Sprint, board, impediment, standup, agreement, decision and note in this workspace")}${folder ? _t(", including the JSON files in your folder") : ""}. ${_t("There is no undo.")}</p>
+        <button class="btn btn-danger" data-action="reset-workspace">${ic("trash", 14)}${_t("Reset this workspace")}</button>
       </div>
     </div>
   </div>`;
@@ -3794,7 +3829,7 @@ function renderTimer() {
   host.innerHTML = `<div class="timer ${over ? "over" : ""} ${t.endsAt ? "" : "paused"}">
     <span class="t">${over ? "-" : ""}${mm}:${ss}</span>
     <span class="lbl">${esc(t.label || "Timebox")}</span>
-    <button data-action="timer-toggle" title="${t.endsAt ? "Pause" : "Resume"}">${ic(t.endsAt ? "minus" : "chevR", 14, 2.6)}</button>
+    <button data-action="timer-toggle" title="${t.endsAt ? _t("Pause") : _t("Resume")}">${ic(t.endsAt ? "minus" : "chevR", 14, 2.6)}</button>
     <button data-action="timer-add" title="${_t("Add five minutes")}">${ic("plus", 14, 2.6)}</button>
     <button data-action="timer-stop" title="${_t("Stop")}">${ic("x", 14, 2.6)}</button>
   </div>`;
@@ -3875,7 +3910,7 @@ function taskFields(board, task) {
   return [
     { name: "title", label: "Task", type: "text", required: true, placeholder: "What needs to happen?" },
     { name: "description", label: "Details", type: "textarea", rows: 3, placeholder: "Context, acceptance criteria, links…" },
-    { name: "columnId", label: "Column", type: "select", half: true, full: false, raw: true, options: board.columns.map(c => ({ value: c.id, label: c.name })) },
+    { name: "columnId", label: "Column", type: "select", half: true, full: false, raw: true, options: board.columns.map(c => ({ value: c.id, label: _sd(c.name) })) },
     { name: "points", label: "Story points", type: "number", half: true, full: false, min: 0, max: 100 },
     {
       name: "sprintId", label: "Sprint", type: "select", half: true, full: false,
@@ -4198,8 +4233,8 @@ function wireBoardForm(form, initialDoneId) {
     });
     const wanted = select.value || preferred;
     select.innerHTML = included.length
-      ? included.map(c => '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>").join("")
-      : '<option value="">— no columns yet —</option>';
+      ? included.map(c => '<option value="' + esc(c.id) + '">' + esc(_sd(c.name)) + "</option>").join("")
+      : '<option value="">' + esc(_t("— no columns yet —")) + '</option>';
     // Keep the current pick if it survived, otherwise fall back to the last column.
     if (included.some(c => c.id === wanted)) select.value = wanted;
     else if (included.length) select.value = included[included.length - 1].id;
@@ -4217,16 +4252,16 @@ function wireBoardForm(form, initialDoneId) {
 function decisionRecordHTML(d) {
   const opts = d.options || [];
   const hist = (d.history || []).slice().reverse();
-  const block = (label, body) => `<div style="margin-bottom:18px"><div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(label)}</div>${body}</div>`;
+  const block = (label, body) => `<div style="margin-bottom:18px"><div class="mini bold dim" style="text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(_t(label))}</div>${body}</div>`;
   return `
     <div class="row wrap" style="gap:8px;margin-bottom:18px">
       ${statusBadge(d.status)}${impactBadge(d.impact)}
-      <span class="badge b-neutral">${ic("calendar", 11)}${esc(fmtDate(d.date) || "no date")}</span>
+      <span class="badge b-neutral">${ic("calendar", 11)}${esc(fmtDate(d.date) || _t("no date"))}</span>
       ${(d.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}
     </div>
     ${block("Problem statement", `<p style="font-size:13.5px;font-weight:600;line-height:1.6">${esc(d.problem)}</p>`)}
-    ${block("Decision taken", `<p style="font-size:13px;line-height:1.65">${esc(d.decision || "— not recorded —")}</p>`)}
-    ${block("Why this one", `<p style="font-size:13px;line-height:1.65;color:var(--text-2)">${esc(d.rationale || "— not recorded —")}</p>`)}
+    ${block("Decision taken", `<p style="font-size:13px;line-height:1.65">${esc(d.decision || _t("— not recorded —"))}</p>`)}
+    ${block("Why this one", `<p style="font-size:13px;line-height:1.65;color:var(--text-2)">${esc(d.rationale || _t("— not recorded —"))}</p>`)}
     ${opts.length ? block("Options considered", `<div class="stack-sm">${opts.map(o => `<div class="item" style="padding:10px 12px">
         <div class="grow"><h4>${esc(o.label)}</h4>${o.why ? `<p>${esc(o.why)}</p>` : ""}</div></div>`).join("")}</div>`) : ""}
     ${d.approver ? block("Approved by", `<div class="row" style="gap:10px">${avatar(d.approver, "md")}
@@ -4293,7 +4328,7 @@ function stampMove(task, board, toColumnId) {
   }
 }
 function deleteFootBtn(action, id) {
-  return `<button type="button" class="btn btn-danger-soft btn-sm" data-action="${action}" data-id="${id}">${ic("trash", 13)}Delete</button>`;
+  return `<button type="button" class="btn btn-danger-soft btn-sm" data-action="${action}" data-id="${id}">${ic("trash", 13)}${_t("Delete")}</button>`;
 }
 
 const ACTIONS = {
@@ -4394,8 +4429,8 @@ const ACTIONS = {
   },
   "switch-to-local"() {
     confirmDialog({
-      title: "Store in this browser instead?",
-      message: "Your current data is copied into this browser. The JSON files in " + Store.folderName + " are left exactly as they are.",
+      title: _t("Store in this browser instead?"),
+      message: _tp("Your current data is copied into this browser. The JSON files in {folder} are left exactly as they are.", { folder: Store.folderName }),
       confirmLabel: "Copy to browser",
       onConfirm: async () => {
         Store.mode = "local"; Store.dir = null;
@@ -4449,10 +4484,10 @@ const ACTIONS = {
   },
   "reset-workspace"() {
     confirmDialog({
-      title: "Reset this workspace?",
-      messageHTML: "Every board, sprint, impediment, standup, agreement, decision and note will be deleted" +
-        (Store.mode === "folder" ? ", and the JSON files in <b>" + esc(Store.folderName) + "</b> will be removed" : "") +
-        ". There is no undo. Consider exporting a backup first.",
+      title: _t("Reset this workspace?"),
+      messageHTML: Store.mode === "folder"
+        ? _tp("Every board, sprint, impediment, standup, agreement, decision and note will be deleted, and the JSON files in <b>{folder}</b> will be removed. There is no undo. Consider exporting a backup first.", { folder: esc(Store.folderName) })
+        : _t("Every board, sprint, impediment, standup, agreement, decision and note will be deleted. There is no undo. Consider exporting a backup first."),
       confirmLabel: "Delete everything", danger: true, requireText: "RESET",
       onConfirm: async () => {
         await Store.wipe();
@@ -4472,10 +4507,15 @@ const ACTIONS = {
     if (v === LANG) return;
     LANG = v;
     try { localStorage.setItem(LANG_KEY, v); } catch (e) { /* private mode */ }
+    /* The wizard has its own switch, and it is the only modal worth keeping:
+       it holds no typing, and render() never repaints it. Everything else is
+       closed rather than redrawn, so unsaved typing is not silently lost. */
+    const inWizard = !!$(".modal.wizard");
     closeAllModals();
     applyLang();
     render();
     renderTimer();
+    if (inWizard) openWizard();
   },
 
   "set-theme"(el) {
@@ -4523,7 +4563,7 @@ const ACTIONS = {
         columns: b.columns.map(c => Object.assign({}, c, { include: true })),
         doneColumnId: currentDone ? currentDone.id : "",
       },
-      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-board">${ic("trash", 13)}Delete board</button>`,
+      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-board">${ic("trash", 13)}${_t("Delete board")}</button>`,
       afterRender: form => wireBoardForm(form, currentDone ? currentDone.id : ""),
       onSave: v => {
         const cols = normaliseColumns(v.columns, b.columns, v.doneColumnId);
@@ -4540,14 +4580,17 @@ const ACTIONS = {
             b.tasks.forEach(t => { if (!validIds.includes(t.columnId)) t.columnId = cols[0].id; });
             b.columns = cols;
           }, "Updated board: " + b.name, "update");
-          toast(orphans.length ? pluralise(orphans.length, "task") + " moved to " + cols[0].name + "." : "Board updated.", "ok", 4000);
+          toast(orphans.length ? _tp("{tasks} moved to {column}.", { tasks: pluralise(orphans.length, "task"), column: cols[0].name }) : "Board updated.", "ok", 4000);
         };
         if (!orphans.length) return apply();
         confirmDialog({
           title: _tp("Move {tasks}?", { tasks: pluralise(orphans.length, "task") }),
-          messageHTML: "You removed " + pluralise(b.columns.length - cols.length, "column") + " that still " +
-            (orphans.length === 1 ? "holds a task" : "hold tasks") + ". " +
-            pluralise(orphans.length, "task") + " will move to <b>" + esc(cols[0].name) + "</b>.",
+          messageHTML: _tp("You removed {columns} that still {holds}. {tasks} will move to <b>{column}</b>.", {
+            columns: pluralise(b.columns.length - cols.length, "column"),
+            holds: orphans.length === 1 ? _t("holds a task") : _t("hold tasks"),
+            tasks: pluralise(orphans.length, "task"),
+            column: esc(cols[0].name),
+          }),
           confirmLabel: "Move and save",
           onConfirm: apply,
         });
@@ -4558,8 +4601,8 @@ const ACTIONS = {
     const b = activeBoard();
     if (!b) return;
     confirmDialog({
-      title: "Delete this board?",
-      message: "“" + b.name + "” and its " + pluralise(b.tasks.length, "task") + " will be deleted.",
+      title: _t("Delete this board?"),
+      message: _tp("“{name}” and its {tasks} will be deleted.", { name: b.name, tasks: pluralise(b.tasks.length, "task") }),
       confirmLabel: "Delete board", danger: true,
       onConfirm: () => mutate(["boards", "settings"], () => {
         S.boards.items = S.boards.items.filter(x => x.id !== b.id);
@@ -4633,8 +4676,8 @@ const ACTIONS = {
     openModal({
       title: "Edit task", fields: taskFields(b, t), values: t,
       subtitle: t.doneAt ? "Finished " + fmtDate(t.doneAt) : (t.startedAt ? "In flight for " + pluralise(Math.max(0, Math.round((Date.now() - new Date(t.startedAt)) / 86400000)), "day") : ""),
-      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="raise-from-task" data-task-id="${t.id}">${ic("alert", 13)}Raise impediment</button>
-        <button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-task" data-id="${t.id}">${ic("trash", 13)}Delete</button>`,
+      footLeftHTML: `<button type="button" class="btn btn-danger-soft btn-sm" data-action="raise-from-task" data-task-id="${t.id}">${ic("alert", 13)}${_t("Raise impediment")}</button>
+        <button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-task" data-id="${t.id}">${ic("trash", 13)}${_t("Delete")}</button>`,
       onSave: v => {
         closeAllModals();
         const movedColumn = v.columnId !== t.columnId;
@@ -4663,7 +4706,7 @@ const ACTIONS = {
     const over = target.wip && b.tasks.filter(x => x.columnId === target.id).length >= target.wip;
     mutate("boards", () => { stampMove(t, b, target.id); },
       "Moved “" + t.title + "” to " + target.name, "move");
-    if (over) toast(target.name + " is over its WIP limit of " + target.wip + " — finish something before starting more.", "warn", 5000);
+    if (over) toast(_tp("{column} is over its WIP limit of {limit} — finish something before starting more.", { column: target.name, limit: target.wip }), "warn", 5000);
   },
   "raise-from-task"(el) {
     const b = activeBoard();
@@ -4825,8 +4868,8 @@ const ACTIONS = {
       fields: standupFields(existing), values: values,
       saveLabel: existing ? "Save" : "Record standup",
       topHTML: `<div class="row" style="gap:8px;margin-bottom:14px">
-        <button type="button" class="btn btn-soft btn-sm" data-action="start-timer" data-min="15" data-label="Daily Scrum">${ic("clock", 12)}Start the 15 minutes</button>
-        ${existing ? `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-standup" data-id="${existing.id}">${ic("trash", 12)}Delete</button>` : ""}
+        <button type="button" class="btn btn-soft btn-sm" data-action="start-timer" data-min="15" data-label="Daily Scrum">${ic("clock", 12)}${_t("Start the 15 minutes")}</button>
+        ${existing ? `<button type="button" class="btn btn-danger-soft btn-sm" data-action="delete-standup" data-id="${existing.id}">${ic("trash", 12)}${_t("Delete")}</button>` : ""}
       </div>`,
       onSave: v => {
         closeAllModals();
@@ -4835,7 +4878,7 @@ const ACTIONS = {
           else S.standups.items.push(Object.assign({ id: uid("sta"), createdAt: nowISO(), sprintId: sprint ? sprint.id : "" }, v));
         }, "Recorded the Daily Scrum of " + fmtDate(v.date), existing ? "update" : "create");
         const blocked = (v.entries || []).filter(e => e.blocker).length;
-        if (blocked) toast(pluralise(blocked, "blocker") + " mentioned — raise the ones that are real impediments.", "warn", 5000);
+        if (blocked) toast(_tp("{blockers} mentioned — raise the ones that are real impediments.", { blockers: pluralise(blocked, "blocker") }), "warn", 5000);
       },
     });
   },
@@ -4987,7 +5030,7 @@ const ACTIONS = {
     if (!running || running.id === s.id) { go(); return; }
     confirmDialog({
       title: _tp("Close {sprint} first?", { sprint: running.name }),
-      message: "Only one Sprint can be active. “" + running.name + "” will be marked closed and its velocity recorded.",
+      message: _tp("Only one Sprint can be active. “{name}” will be marked closed and its velocity recorded.", { name: running.name }),
       confirmLabel: _tp("Start {sprint}", { sprint: s.name }),
       onConfirm: () => { running.velocity = velocityOf(running); go(); },
     });
@@ -5109,7 +5152,7 @@ const ACTIONS = {
       title: "Decision record", subtitle: _tp("Logged {date}", { date: fmtDate(d.createdAt || d.date) }),
       width: "wide", fields: [], bottomHTML: decisionRecordHTML(d),
       cancelLabel: "Close",
-      footLeftHTML: `<button type="button" class="btn btn-ghost btn-sm" data-action="edit-decision" data-id="${d.id}">${ic("edit", 13)}Edit</button>`,
+      footLeftHTML: `<button type="button" class="btn btn-ghost btn-sm" data-action="edit-decision" data-id="${d.id}">${ic("edit", 13)}${_t("Edit")}</button>`,
     });
   },
   "edit-decision"(el) {
@@ -5127,7 +5170,7 @@ const ACTIONS = {
           d.history = d.history || [];
           if (changes.length) d.history.push({ at: nowISO(), text: changes.join(" · ") });
         }, "Updated decision: " + v.problem.slice(0, 60), "update");
-        toast(changes.length ? pluralise(changes.length, "change") + " recorded in history." : "Nothing changed.", "ok");
+        toast(changes.length ? _tp("{changes} recorded in history.", { changes: pluralise(changes.length, "change") }) : "Nothing changed.", "ok");
       },
     });
   },
@@ -5211,9 +5254,8 @@ const ACTIONS = {
 
     if (dor.total && !dor.ready) {
       confirmDialog({
-        title: "Not ready yet",
-        messageHTML: "This item meets <b>" + dor.met + " of " + dor.total + "</b> Definition-of-Ready criteria. " +
-          "Pulling it in anyway is a choice worth making out loud.",
+        title: _t("Not ready yet"),
+        messageHTML: _tp("This item meets <b>{met} of {total}</b> Definition-of-Ready criteria. Pulling it in anyway is a choice worth making out loud.", { met: dor.met, total: dor.total }),
         confirmLabel: "Pull it in anyway",
         onConfirm: go,
       });
@@ -5434,8 +5476,8 @@ ACTIONS["conflict-load"] = async function () {
 };
 ACTIONS["conflict-replace"] = function () {
   confirmDialog({
-    title: "Overwrite the files in that folder?",
-    message: "The workspace stored in " + Store.folderName + " will be replaced by the one on screen.",
+    title: _t("Overwrite the files in that folder?"),
+    message: _tp("The workspace stored in {folder} will be replaced by the one on screen.", { folder: Store.folderName }),
     confirmLabel: "Overwrite", danger: true, requireText: "OVERWRITE",
     onConfirm: async () => {
       S = window.__conflictSnapshot;
@@ -5608,7 +5650,7 @@ document.addEventListener("drop", ev => {
       const at = beforeEl ? board.tasks.findIndex(t => t.id === beforeEl.dataset.taskId) : -1;
       if (at >= 0) board.tasks.splice(at, 0, moved); else board.tasks.push(moved);
     }, from && to && from.id !== to.id ? "Moved “" + moved.title + "” from " + from.name + " to " + to.name : null, "move");
-    if (changedColumn && over) toast(to.name + " is over its WIP limit of " + to.wip + ".", "warn", 5000);
+    if (changedColumn && over) toast(_tp("{column} is over its WIP limit of {limit}.", { column: to.name, limit: to.wip }), "warn", 5000);
     dragTaskId = null;
     return;
   }
@@ -5690,6 +5732,14 @@ const NL = {
   "Recent Activity": "Recente activiteit",
   "Open settings": "Instellingen openen",
   "Good morning": "Goedemorgen",
+  "Welcome": "Welkom",
+  "just now": "net nu",
+  "{n}m ago": "{n} min geleden",
+  "{n}h ago": "{n} u geleden",
+  "{n}d ago": "{n} d geleden",
+  "Let's clear the way for the team.": "Laten we de weg vrijmaken voor het team.",
+  "Developer": "Developer",
+  "Scrum Master": "Scrum Master",
   "Good afternoon": "Goedemiddag",
   "Good evening": "Goedenavond",
   "Let's build something amazing today.": "Laten we vandaag iets moois bouwen.",
@@ -5738,6 +5788,8 @@ const NL = {
   "Objective": "Doelstelling",
   "Objectives": "Doelstellingen",
   "Milestone": "Mijlpaal",
+  "milestone": "mijlpaal",
+  "milestones": "mijlpalen",
   "Milestones": "Mijlpalen",
   "Decision": "Besluit",
   "Decisions": "Besluiten",
@@ -5765,6 +5817,16 @@ const NL = {
   "Language": "Taal",
   "Storage": "Opslag",
   "{field} is required.": "{field} is verplicht.",
+  "{file}.json is not valid JSON — it was skipped, not overwritten.":
+    "{file}.json is geen geldige JSON — overgeslagen, niet overschreven.",
+  "{tasks} moved to {column}.": "{tasks} verplaatst naar {column}.",
+  "{column} is over its WIP limit of {limit} — finish something before starting more.":
+    "{column} zit boven de WIP-limiet van {limit} — maak eerst iets af voor je nieuw werk start.",
+  "{column} is over its WIP limit of {limit}.": "{column} zit boven de WIP-limiet van {limit}.",
+  "{label} session is up — take a break.": "{label}-sessie is voorbij — neem even pauze.",
+  "{mins}-minute focus session started.": "Focussessie van {mins} minuten gestart.",
+  "{blockers} mentioned — raise the ones that are real impediments.":
+    "{blockers} genoemd — meld degene die echte impediments zijn.",
   "comma, separated": "komma, gescheiden",
   "all clear": "alles in orde",
   "Choose the language of the interface. Your saved data is not affected.":
@@ -5817,6 +5879,8 @@ const NL = {
   "Your Kanban workspace.": "Je Kanban-werkruimte.",
   "Taskboard (Kanban)": "Takenbord (Kanban)",
   "No board yet": "Nog geen bord",
+  "Make one board per project. This card then tracks your flow across all of them.":
+    "Maak één bord per project. Deze kaart volgt daarna je flow over alle borden.",
   "Create your first board. It starts with Backlog, To Do, In Progress, Review and Done — rename, recolour or delete any of them afterwards.":
     "Maak je eerste bord aan. Het begint met Backlog, To Do, In Progress, Review en Done — je kunt ze daarna hernoemen, verkleuren of verwijderen.",
   "Create your first Kanban board to start tracking work. It comes with the usual columns — you can rename them any time.":
@@ -5830,6 +5894,51 @@ const NL = {
   "New Task": "Nieuwe taak",
   "New task": "Nieuwe taak",
   "Add Task": "Taak toevoegen",
+  "Add your first item": "Voeg je eerste item toe",
+  "New Milestone": "Nieuwe mijlpaal",
+  "New Note": "Nieuwe notitie",
+  "New Session": "Nieuwe sessie",
+  "Start your first retro": "Start je eerste retro",
+  "Write your first note": "Schrijf je eerste notitie",
+  "Add Link": "Link toevoegen",
+  "Add Service": "Service toevoegen",
+  "Add the first service": "Voeg de eerste service toe",
+  "All checklists": "Alle checklists",
+  "Create your first board": "Maak je eerste bord aan",
+  "Log Debt": "Tech debt vastleggen",
+  "Log as debt": "Vastleggen als tech debt",
+  "Log the first one": "Leg de eerste vast",
+  "New Checklist": "Nieuwe checklist",
+  "New Command": "Nieuw commando",
+  "New Snippet": "Nieuwe snippet",
+  "Open PR": "PR openen",
+  "Open the board": "Bord openen",
+  "Record the first one": "Leg de eerste vast",
+  "Repo": "Repo",
+  "Save your first command": "Bewaar je eerste commando",
+  "Save your first snippet": "Bewaar je eerste snippet",
+  "Write the first one": "Schrijf de eerste",
+  "Add Member": "Lid toevoegen",
+  "Add another event": "Nog een event toevoegen",
+  "Add the first member": "Voeg het eerste lid toe",
+  "Add your first release": "Voeg je eerste release toe",
+  "Correct a day": "Een dag corrigeren",
+  "Health check": "Gezondheidscheck",
+  "New Agreement": "Nieuwe afspraak",
+  "New Release": "Nieuwe release",
+  "New Sprint": "Nieuwe Sprint",
+  "New check": "Nieuwe check",
+  "Open Playbook": "Playbook openen",
+  "Open Sprint metrics": "Sprint-metrics openen",
+  "Plan your first Sprint": "Plan je eerste Sprint",
+  "Raise": "Melden",
+  "Raise Impediment": "Impediment melden",
+  "Raise impediment": "Impediment melden",
+  "Raise your first impediment": "Meld je eerste impediment",
+  "Run standup": "Standup starten",
+  "Start timebox": "Timebox starten",
+  "Summary": "Samenvatting",
+  "Take the first check": "Doe de eerste check",
   "Add task": "Taak toevoegen",
   "Edit task": "Taak bewerken",
   "Board": "Bord",
@@ -5840,6 +5949,23 @@ const NL = {
   "Move left": "Naar links",
   "Move right": "Naar rechts",
   "Work-in-progress limit": "WIP-limiet",
+  "{n} blocked": "{n} geblokkeerd",
+  "{cards} · {done} done · drag between columns, or use the arrows":
+    "{cards} · {done} klaar · sleep tussen kolommen, of gebruik de pijlen",
+  "Work-in-progress limit exceeded": "WIP-limiet overschreden",
+  "Untouched for {days}": "Onaangeroerd {days}",
+  "Untouched for {days}+ days": "Onaangeroerd {days}+ dagen",
+  "{n} stale": "{n} verouderd",
+  "Average {n}": "Gemiddeld {n}",
+  "Chart": "Diagram",
+  "Count": "Aantal",
+  "Recorded {date}": "Vastgelegd {date}",
+  "{days} old": "{days} oud",
+  "today": "vandaag",
+  "tomorrow": "morgen",
+  "pts": "pts",
+  "{date} · {n} {unit} left": "{date} · {n} {unit} over",
+  "{name} ends {when} with {n} {unit} left": "{name} eindigt {when} met {n} {unit} over",
   "No match here": "Hier niets gevonden",
   "Drop tasks here": "Sleep taken hierheen",
   "Open full board": "Volledig bord openen",
@@ -5918,6 +6044,9 @@ const NL = {
   "The record of what was decided, by whom, and — most importantly — why.":
     "Het overzicht van wat besloten is, door wie, en — het belangrijkste — waarom.",
   "Problem statement": "Probleemstelling",
+  "Why this one": "Waarom deze",
+  "History": "Geschiedenis",
+  "no date": "geen datum",
   "Approved by": "Goedgekeurd door",
   "No decisions logged": "Nog geen besluiten vastgelegd",
   "Nothing decided yet": "Nog niets besloten",
@@ -6077,6 +6206,155 @@ const NL = {
   "There is no undo.": "Dit kan niet ongedaan gemaakt worden.",
   "Reset this workspace": "Werkruimte resetten",
   "Reset this workspace?": "Werkruimte resetten?",
+  "Folder": "Map",
+  "+ {n} more": "+ {n} meer",
+  "{done}/{total} actions done": "{done}/{total} acties gedaan",
+  "Focus {n} min": "Focus {n} min",
+  "{n} min": "{n} min",
+  "no location noted": "geen locatie genoteerd",
+  "{level} severity": "ernst {level}",
+  "All languages ({n})": "Alle talen ({n})",
+  "nobody": "niemand",
+  "nobody is chasing this": "niemand volgt dit op",
+  "out of 5": "van de 5",
+  "Mood over the last {checks}": "Stemming over de laatste {checks}",
+  "cleared in {days}": "opgelost in {days}",
+  "{days} open": "{days} open",
+  "kept because the same wall comes back": "bewaard omdat dezelfde muur terugkomt",
+  "<b>{name}</b> is a private board — its cards stay out of the burndown, the velocity and the cycle time.":
+    "<b>{name}</b> is een privébord — de kaarten blijven buiten de burndown, de velocity en de doorlooptijd.",
+  "At an average of <b>{avg}</b> per Sprint, the <b>{queue}</b> points sitting in Refinement are roughly <b>{forecast}</b> of work.":
+    "Bij een gemiddelde van <b>{avg}</b> per Sprint zijn de <b>{queue}</b> points in Refinement ruwweg <b>{forecast}</b> werk.",
+  "Across {items}.": "Over {items}.",
+  "No closed Sprints yet": "Nog geen afgesloten Sprints",
+  "Mean of the last {n} closed Sprints.": "Gemiddelde van de laatste {n} afgesloten Sprints.",
+  "Move cards across the board and this fills in.":
+    "Verplaats kaarten over het bord en dit vult zichzelf.",
+  "Add your team to see capacity.": "Voeg je team toe om capaciteit te zien.",
+  "Nothing blocking the team": "Niets blokkeert het team",
+  "{n} aging": "{n} verouderend",
+  "{n} lost to absence this Sprint.": "{n} verloren aan afwezigheid deze Sprint.",
+  "{n} lost to absence across {days}.": "{n} verloren aan afwezigheid over {days}.",
+  "No Sprint running.": "Er loopt geen Sprint.",
+  "Timeboxes shown are the maximum for a one-month Sprint; shorter Sprints get proportionally shorter events.":
+    "De getoonde timeboxen zijn het maximum voor een Sprint van een maand; kortere Sprints krijgen evenredig kortere events.",
+  "15-min timebox": "Timebox van 15 min",
+  "Everyone in the Scrum Team.": "Iedereen in het Scrum Team.",
+  "Everyone is in.": "Iedereen is er.",
+  "Checked {date}.": "Gemeten op {date}.",
+  "Nothing recorded yet": "Nog niets vastgelegd",
+  "{checks} recorded": "{checks} vastgelegd",
+  "Open {n}+ days. These need escalating.": "Al {n}+ dagen open. Deze moeten geëscaleerd worden.",
+  "Nothing resolved yet.": "Nog niets opgelost.",
+  "Nothing blocking — enjoy it": "Niets blokkeert — geniet ervan",
+  "Meet all {n} Definition-of-Ready criteria.":
+    "Voldoen aan alle {n} Definition-of-Ready-criteria.",
+  "Write a Definition of Ready in the Playbook.":
+    "Schrijf een Definition of Ready in het Playbook.",
+  "Roughly {sprints} at the current average.": "Ongeveer {sprints} bij het huidige gemiddelde.",
+  "Estimate items to forecast.": "Schat items in om te kunnen forecasten.",
+  "{name} is running.": "{name} loopt.",
+  "Start a Sprint before pulling items in.": "Start een Sprint voordat je items binnenhaalt.",
+  "Deletes every Sprint, board, impediment, standup, agreement, decision and note in this workspace":
+    "Verwijdert elke Sprint, elk bord, impediment, standup, afspraak, besluit en notitie in deze werkruimte",
+  "Checklist": "Checklist",
+  "Nothing finished yet": "Nog niets afgerond",
+  "Move a card to Done to start measuring.": "Verplaats een kaart naar Klaar om te gaan meten.",
+  "Across {cards}.": "Over {cards}.",
+  "{cards} finished in the last 8 weeks": "{cards} afgerond in de laatste 8 weken",
+  "{items} on the books": "{items} op de lijst",
+  "{items} · worst first": "{items} · ergste eerst",
+  "A timer that keeps running while you move around the tool. Stop when it rings, or do not — it is your clock.":
+    "Een timer die blijft lopen terwijl je door de tool beweegt. Stop als hij afgaat, of niet — het is jouw klok.",
+  "Deletes every board, snippet, command, service, decision, note and debt item in this workspace":
+    "Verwijdert elk bord, snippet, commando, service, besluit, notitie en tech debt-item in deze werkruimte",
+  "This file is plain JSON on your disk and may end up in a repo or a sync folder.":
+    "Dit bestand is gewone JSON op je schijf en kan in een repo of syncmap belanden.",
+  "Record <i>where</i> a credential lives, never the credential itself.":
+    "Leg vast <i>waar</i> een credential staat, nooit de credential zelf.",
+  "Log": "Vastleggen",
+  "New": "Nieuw",
+  "PR": "PR",
+  "repo": "repo",
+  "Pause": "Pauzeren",
+  "Resume": "Hervatten",
+  "Nothing is stuck.": "Niets zit vast.",
+  "Something is waiting on someone.": "Er wacht iets op iemand.",
+  "Nothing critical logged.": "Niets kritieks vastgelegd.",
+  "These are the ones to argue for.": "Dit zijn degene om je voor in te zetten.",
+  "All": "Alle",
+  "Continue standup": "Standup vervolgen",
+  "Run the standup": "Start de standup",
+  "Run today's standup": "Start de standup van vandaag",
+  "Record today's standup": "Standup van vandaag vastleggen",
+  "Record today": "Vandaag vastleggen",
+  "Edit today": "Vandaag bewerken",
+  "Today is recorded": "Vandaag is vastgelegd",
+  "Nothing recorded today": "Vandaag niets vastgelegd",
+  "next facilitator: {name}": "volgende facilitator: {name}",
+  "recorded": "vastgelegd",
+  "not yet": "nog niet",
+  "No active Sprint": "Geen actieve Sprint",
+  "Recorded automatically each day you use the tool":
+    "Wordt elke dag dat je de tool gebruikt automatisch vastgelegd",
+  "Start the 15 minutes": "Start de 15 minuten",
+  "Chase these before the next session.": "Volg deze op voor de volgende sessie.",
+  "Nothing outstanding.": "Niets openstaand.",
+  "{days} late": "{days} te laat",
+  "in {days}": "over {days}",
+  "Reminder: {text}": "Herinnering: {text}",
+  "Overdue task: {title}": "Taak te laat: {title}",
+  "Decision still pending: {problem}": "Besluit nog open: {problem}",
+  "Milestone past due: {title}": "Mijlpaal over datum: {title}",
+  "Overdue: {title}": "Te laat: {title}",
+  "Blocked {days}: {title}": "Geblokkeerd {days}: {title}",
+  "Untouched {days}: {title}": "Onaangeroerd {days}: {title}",
+  "Debt open {days}: {title}": "Tech debt open {days}: {title}",
+  "Decision still open: {problem}": "Besluit nog open: {problem}",
+  "Impediment open {days}: {title}": "Impediment open {days}: {title}",
+  "Release past due: {title}": "Release over datum: {title}",
+  "Retro action still open: {text}": "Retro-actie nog open: {text}",
+  "All status": "Alle statussen",
+  "— no columns yet —": "— nog geen kolommen —",
+  "No period set": "Geen periode ingesteld",
+  "+ New board…": "+ Nieuw bord…",
+  "Folder: {name}": "Map: {name}",
+  "This browser (localStorage)": "Deze browser (localStorage)",
+  "This browser could not remember your folder — please pick it again.":
+    "Deze browser kon je map niet onthouden — kies hem opnieuw.",
+  "IndexedDB is blocked by another tab": "IndexedDB wordt geblokkeerd door een ander tabblad",
+  "IndexedDB timed out": "IndexedDB gaf een time-out",
+  "Permission to write in that folder was not granted.":
+    "Geen toestemming gekregen om in die map te schrijven.",
+  "Copied.": "Gekopieerd.",
+  "Not a link this browser can open — copied instead.":
+    "Geen link die deze browser kan openen — in plaats daarvan gekopieerd.",
+  "Your current data is copied into this browser. The JSON files in {folder} are left exactly as they are.":
+    "Je huidige data wordt naar deze browser gekopieerd. De JSON-bestanden in {folder} blijven precies zoals ze zijn.",
+  "The workspace stored in {folder} will be replaced by the one on screen.":
+    "De werkruimte in {folder} wordt vervangen door die op het scherm.",
+  "“{name}” and its {tasks} will be deleted.":
+    "“{name}” en de bijbehorende {tasks} worden verwijderd.",
+  "You removed {columns} that still {holds}. {tasks} will move to <b>{column}</b>.":
+    "Je hebt {columns} verwijderd die nog {holds}. {tasks} worden verplaatst naar <b>{column}</b>.",
+  "holds a task": "een taak bevat",
+  "hold tasks": "taken bevatten",
+  "Every board, decision, note, goal, milestone and document will be deleted. There is no undo. Consider exporting a backup first.":
+    "Elk bord, besluit, notitie, doel, mijlpaal en document wordt verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
+  "Every board, decision, note, goal, milestone and document will be deleted, and the JSON files in <b>{folder}</b> will be removed. There is no undo. Consider exporting a backup first.":
+    "Elk bord, besluit, notitie, doel, mijlpaal en document wordt verwijderd, en de JSON-bestanden in <b>{folder}</b> worden verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
+  "Every board, snippet, command, service, decision, note and debt item will be deleted. There is no undo. Consider exporting a backup first.":
+    "Elk bord, snippet, commando, service, besluit, notitie en tech debt-item wordt verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
+  "Every board, snippet, command, service, decision, note and debt item will be deleted, and the JSON files in <b>{folder}</b> will be removed. There is no undo. Consider exporting a backup first.":
+    "Elk bord, snippet, commando, service, besluit, notitie en tech debt-item wordt verwijderd, en de JSON-bestanden in <b>{folder}</b> worden verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
+  "Every board, sprint, impediment, standup, agreement, decision and note will be deleted. There is no undo. Consider exporting a backup first.":
+    "Elk bord, elke Sprint, impediment, standup, afspraak, besluit en notitie wordt verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
+  "Every board, sprint, impediment, standup, agreement, decision and note will be deleted, and the JSON files in <b>{folder}</b> will be removed. There is no undo. Consider exporting a backup first.":
+    "Elk bord, elke Sprint, impediment, standup, afspraak, besluit en notitie wordt verwijderd, en de JSON-bestanden in <b>{folder}</b> worden verwijderd. Dit kan niet worden teruggedraaid. Exporteer eerst een back-up.",
+  "Only one Sprint can be active. “{name}” will be marked closed and its velocity recorded.":
+    "Er kan maar één Sprint actief zijn. “{name}” wordt afgesloten en de velocity wordt vastgelegd.",
+  "This item meets <b>{met} of {total}</b> Definition-of-Ready criteria. Pulling it in anyway is a choice worth making out loud.":
+    "Dit item voldoet aan <b>{met} van {total}</b> Definition-of-Ready-criteria. Het alsnog binnenhalen is een keuze die je hardop moet maken.",
   "Delete everything": "Alles verwijderen",
   "Backup downloaded.": "Back-up gedownload.",
   "That file is not valid JSON.": "Dat bestand is geen geldige JSON.",
@@ -6102,6 +6380,12 @@ const NL = {
     "Als de map al een werkruimte bevat, wordt die geladen en nooit gewist. Back-uppen of synchroniseren mag je helemaal zelf weten.",
   "Folder storage is unavailable in this browser.": "Opslag in een map is niet beschikbaar in deze browser.",
   "It needs Chrome or Edge.": "Het vereist Chrome of Edge.",
+  "If you are already in Chrome, open this file through a local server (<code>python -m http.server</code> in this folder, then visit <code>localhost:8000/{file}</code>) and the option will appear.":
+    "Als je al in Chrome zit, open dit bestand dan via een lokale server (<code>python -m http.server</code> in deze map, ga daarna naar <code>localhost:8000/{file}</code>) en de optie verschijnt.",
+  "You start with the five Scrum events and a starter Definition of Done already filled in — everything else is empty.":
+    "Je begint met de vijf Scrum-events en een eerste Definition of Done al ingevuld — al het andere is leeg.",
+  "This workspace is kept separate from any Product Owner dashboard on this machine.":
+    "Deze werkruimte staat los van elk Product Owner-dashboard op deze machine.",
   "If you are already in Chrome, open this file through a local server (<code>python -m http.server</code> in this folder, then visit <code>localhost:8000</code>) and the option will appear.":
     "Als je al in Chrome zit, open dit bestand dan via een lokale server (<code>python -m http.server</code> in deze map, ga daarna naar <code>localhost:8000</code>) en de optie verschijnt.",
   "Your workspace starts completely empty — no sample tasks, no placeholder people.":
@@ -6152,6 +6436,7 @@ const NL = {
   "Link": "Link",
   "Checklists": "Checklists",
   "Welcome to your Developer Dashboard": "Welkom bij je Developer Dashboard",
+  "Welcome to your Scrum Master Dashboard": "Welkom bij je Scrum Master Dashboard",
   "Your profile, how you work, and where the workspace is stored.":
     "Je profiel, hoe je werkt, en waar de werkruimte wordt opgeslagen.",
   "How you work": "Hoe je werkt",
@@ -6209,6 +6494,26 @@ const NL = {
     "Waar je aan werkt, en wat afronden in de weg staat.",
   "finished card": "afgeronde kaart",
   "finished cards": "afgeronde kaarten",
+  "board": "bord",
+  "boards": "borden",
+  "card": "kaart",
+  "cards": "kaarten",
+  "command": "commando",
+  "commands": "commando's",
+  "day": "dag",
+  "days": "dagen",
+  "step": "stap",
+  "steps": "stappen",
+  "blocker": "blocker",
+  "blockers": "blockers",
+  "check": "check",
+  "checks": "checks",
+  "impediment": "impediment",
+  "impediments": "impediments",
+  "person": "persoon",
+  "people": "personen",
+  "release": "release",
+  "releases": "releases",
   "Kind": "Soort",
   "Bug": "Bug",
   "Chore": "Klus",
@@ -6467,6 +6772,81 @@ const NL = {
   "Event": "Event",
   "Team": "Team",
   "Playbook": "Playbook",
+  "1-2-4-All": "1-2-4-All",
+  "4Ls — Liked, Learned, Lacked, Longed for": "4Ls — Liked, Learned, Lacked, Longed for",
+  "Dot voting": "Dot voting",
+  "Fist of Five": "Fist of Five",
+  "Five Whys": "Five Whys",
+  "Increment": "Increment",
+  "Mad / Sad / Glad": "Mad / Sad / Glad",
+  "Planning Poker": "Planning Poker",
+  "Product Backlog": "Product Backlog",
+  "Product Goal": "Product Goal",
+  "Sailboat": "Sailboat",
+  "Sprint Backlog": "Sprint Backlog",
+  "Sprint Planning": "Sprint Planning",
+  "Sprint Retrospective": "Sprint Retrospective",
+  "Sprint Review": "Sprint Review",
+  "Start / Stop / Continue": "Start / Stop / Continue",
+  "T-shirt sizing": "T-shirt sizing",
+  "Pick one deliberately instead of running the same format for the ninth time":
+    "Kies er bewust één in plaats van voor de negende keer hetzelfde format te draaien",
+  "The Sprint": "De Sprint",
+  "1 month or less": "1 maand of minder",
+  "The container for all other events. A new one starts the moment the last ends.":
+    "De container voor alle andere events. Een nieuwe start op het moment dat de vorige eindigt.",
+  "8h for a 1-month Sprint": "8 uur voor een Sprint van 1 maand",
+  "Why is this Sprint valuable, what can be done, how will it get done.":
+    "Waarom is deze Sprint waardevol, wat kan er gedaan worden, hoe wordt het gedaan.",
+  "15 minutes": "15 minuten",
+  "Developers inspect progress towards the Sprint Goal and adapt the plan.":
+    "Developers inspecteren de voortgang naar het Sprint Goal en passen het plan aan.",
+  "4h for a 1-month Sprint": "4 uur voor een Sprint van 1 maand",
+  "Inspect the Increment with stakeholders, adapt the backlog.":
+    "Inspecteer het Increment met stakeholders en pas de backlog aan.",
+  "3h for a 1-month Sprint": "3 uur voor een Sprint van 1 maand",
+  "Inspect people, interactions, process and tools. Pick improvements.":
+    "Inspecteer mensen, interacties, proces en tooling. Kies verbeteringen.",
+  "An ordered, emergent list of what is needed to improve the product.":
+    "Een geordende, groeiende lijst van wat nodig is om het product te verbeteren.",
+  "The why, the what and the how — by and for the Developers.":
+    "Het waarom, het wat en het hoe — door en voor de Developers.",
+  "A usable step towards the Product Goal. Done means Done.":
+    "Een bruikbare stap naar het Product Goal. Done betekent Done.",
+  "Estimation": "Schatten",
+  "Deciding & unblocking": "Besluiten & deblokkeren",
+  "The default. Fast, and everyone already knows it.":
+    "De standaard. Snel, en iedereen kent het al.",
+  "Early, coarse sizing when points would imply false precision.":
+    "Vroege, grove inschatting wanneer points valse precisie zouden suggereren.",
+  "Thirty items to size in half an hour.": "Dertig items inschatten in een half uur.",
+  "Reference story": "Referentie-story",
+  "A team whose points have quietly inflated. Re-anchor on a known item.":
+    "Een team waarvan de points stilletjes zijn opgeblazen. Anker opnieuw op een bekend item.",
+  "Too many candidate topics or actions to work on.":
+    "Te veel kandidaat-onderwerpen of acties om aan te werken.",
+  "Check consent quickly without a long round of opinions.":
+    "Toets draagvlak snel zonder een lange meningsronde.",
+  "One recurring problem you want to get underneath.":
+    "Eén terugkerend probleem waar je onder wilt kijken.",
+  "Small number of items, and you want the disagreement to surface.":
+    "Klein aantal items, en je wilt dat het meningsverschil bovenkomt.",
+  "Silent writing first": "Eerst stil schrijven",
+  "The first speaker keeps anchoring the whole discussion.":
+    "De eerste spreker ankert steeds de hele discussie.",
+  "Quiet people are being drowned out by the loud ones.":
+    "Stille mensen worden overstemd door de luide.",
+  "Affinity mapping": "Affinity mapping",
+  "Timeline": "Tijdlijn",
+  "After a long or messy Sprint — rebuild what actually happened first.":
+    "Na een lange of rommelige Sprint — reconstrueer eerst wat er echt is gebeurd.",
+  "When you want feeling and learning, not just process.":
+    "Wanneer je gevoel en leren wilt, niet alleen proces.",
+  "When the team needs to talk about what pushes and what drags.":
+    "Wanneer het team wil praten over wat duwt en wat remt.",
+  "After a rough Sprint, when emotion needs a legitimate place.":
+    "Na een zware Sprint, wanneer emotie een legitieme plek nodig heeft.",
+  "Working agreement": "Werkafspraak",
   "Refinement": "Refinement",
   "Releases": "Releases",
   "Sprint Board": "Sprintbord",
@@ -6488,6 +6868,9 @@ const NL = {
   "One sentence the whole team can repeat from memory.": "Eén zin die het hele team uit het hoofd kan herhalen.",
   "The goal matters more than the name.": "Het doel is belangrijker dan de naam.",
   "No Sprint is running": "Er loopt geen Sprint",
+  "No Sprint running": "Er loopt geen Sprint",
+  "Start a Sprint and this card counts the days down for you.":
+    "Start een Sprint en deze kaart telt de dagen voor je af.",
   "No Sprints yet": "Nog geen Sprints",
   "Plan a Sprint": "Plan een Sprint",
   "Plan one": "Plan er een",
@@ -6792,6 +7175,17 @@ const NL = {
   "Commitment": "Commitment",
   "What it is": "Wat het is",
   "The five values": "De vijf waarden",
+  "Openness": "Openheid",
+  "Respect": "Respect",
+  "Courage": "Moed",
+  "To the goal, and to each other.": "Aan het doel, en aan elkaar.",
+  "On the work of the Sprint, not everything at once.":
+    "Op het werk van de Sprint, niet op alles tegelijk.",
+  "About the work and the problems in it.": "Over het werk en de problemen daarin.",
+  "For each other as capable, independent people.":
+    "Voor elkaar als capabele, zelfstandige mensen.",
+  "To do the right thing and work on hard problems.":
+    "Om het juiste te doen en aan lastige problemen te werken.",
   "Facilitation techniques": "Facilitatietechnieken",
   "Retrospective formats": "Retrospective-formats",
   "Vary it. The ninth Start/Stop/Continue in a row stops producing anything.":
@@ -6869,6 +7263,120 @@ const NL = {
     "Elke sectie wordt weggeschreven als een eigen leesbaar JSON-bestand — <code>sprints.json</code>, <code>impediments.json</code>, enzovoort.",
   "Notes &amp; Reminders": "Notities &amp; herinneringen",
   "Add cards and this fills in automatically.": "Voeg kaarten toe en dit vult zich vanzelf.",
+
+  /* ---------------------------------------------------------------------
+     Starter content, read ONLY by _sd(). These are the strings that seed*()
+     and default*() wrote into the workspace on first run. The saved data,
+     the folder JSON and the export keep the English on the left; only the
+     screen shows the Dutch on the right. Never looked up by _t(), so a key
+     here can never translate something the user typed themselves.
+     ------------------------------------------------------------------ */
+  "seed|Backlog": "Backlog",
+  "seed|To Do": "Te doen",
+  "seed|In Progress": "In behandeling",
+  "seed|In Review": "In review",
+  "seed|Review": "Review",
+  "seed|Done": "Klaar",
+  "seed|My Workspace": "Mijn werkruimte",
+  "seed|My Team": "Mijn team",
+  "seed|Before I open the PR": "Voordat ik de PR open",
+  "seed|When I review someone else": "Als ik iemand anders review",
+  "seed|Before it goes out": "Voordat het live gaat",
+  "seed|Builds and runs locally from a clean install":
+    "Bouwt en draait lokaal vanaf een schone installatie",
+  "seed|Tests written for the new behaviour": "Tests geschreven voor het nieuwe gedrag",
+  "seed|Whole test suite green": "Hele testsuite groen",
+  "seed|No debug logging, commented-out code or stray TODOs left behind":
+    "Geen debug-logging, uitgecommentarieerde code of losse TODO's achtergelaten",
+  "seed|Migrations run forward and backward": "Migraties draaien vooruit en terug",
+  "seed|Self-reviewed the diff line by line": "Zelf de diff regel voor regel nagelopen",
+  "seed|Description says what changed and why, not just what":
+    "Beschrijving vertelt wat er is veranderd en waarom, niet alleen wat",
+  "seed|Does it actually do what the description claims?":
+    "Doet het echt wat de beschrijving belooft?",
+  "seed|Would this break anything already in production?":
+    "Breekt dit iets dat al in productie draait?",
+  "seed|Are the edge cases handled — empty, null, huge, concurrent?":
+    "Zijn de randgevallen afgevangen — leeg, null, enorm, gelijktijdig?",
+  "seed|Any secret, key or token in the diff?": "Staat er een secret, key of token in de diff?",
+  "seed|Errors handled, or at least surfaced?":
+    "Fouten afgehandeld, of op zijn minst zichtbaar gemaakt?",
+  "seed|Names and structure I could still follow in six months":
+    "Namen en structuur die ik over een half jaar nog snap",
+  "seed|Comment on the code, never on the person": "Becommentarieer de code, nooit de persoon",
+  "seed|Version bumped and changelog updated": "Versie opgehoogd en changelog bijgewerkt",
+  "seed|Migrations rehearsed on a copy of production data":
+    "Migraties geoefend op een kopie van productiedata",
+  "seed|Environment variables and config in place on the target":
+    "Omgevingsvariabelen en config staan klaar op de doelomgeving",
+  "seed|Rollback plan written down": "Rollback-plan opgeschreven",
+  "seed|Someone other than me knows this is going out":
+    "Iemand anders dan ik weet dat dit live gaat",
+  "seed|Monitoring watched for the first half hour":
+    "Het eerste half uur monitoring in de gaten gehouden",
+  "seed|Decide why this Sprint is valuable, what can be done, and how the work gets done.":
+    "Bepaal waarom deze Sprint waardevol is, wat er gedaan kan worden en hoe het werk wordt gedaan.",
+  "seed|Inspect progress towards the Sprint Goal and adapt today's plan.":
+    "Inspecteer de voortgang naar het Sprint Goal en pas het plan van vandaag aan.",
+  "seed|Add detail, order and estimates so upcoming items meet the Definition of Ready.":
+    "Voeg detail, volgorde en schattingen toe zodat komende items voldoen aan de Definition of Ready.",
+  "seed|Inspect the Increment with stakeholders and adapt the Product Backlog.":
+    "Inspecteer het Increment met stakeholders en pas de Product Backlog aan.",
+  "seed|Inspect how the team worked and pick one improvement to actually make.":
+    "Inspecteer hoe het team werkte en kies één verbetering om echt door te voeren.",
+  "seed|Confirm capacity and absences": "Bevestig capaciteit en afwezigheid",
+  "seed|Product Owner presents the objective": "Product Owner presenteert het doel",
+  "seed|Craft the Sprint Goal together": "Formuleer samen het Sprint Goal",
+  "seed|Select backlog items that serve the goal": "Kies backlog-items die het doel dienen",
+  "seed|Break the first items into a plan": "Werk de eerste items uit tot een plan",
+  "seed|Confirm the team can commit": "Bevestig dat het team zich kan committeren",
+  "seed|Are we still on track for the Sprint Goal?": "Liggen we nog op koers voor het Sprint Goal?",
+  "seed|What changed since yesterday?": "Wat is er sinds gisteren veranderd?",
+  "seed|Any new impediments?": "Nieuwe impediments?",
+  "seed|Re-plan today's work": "Plan het werk van vandaag opnieuw",
+  "seed|Park the deep-dives — take them offline": "Parkeer de deep-dives — bespreek ze offline",
+  "seed|Walk the top of the backlog": "Loop de bovenkant van de backlog door",
+  "seed|Clarify acceptance criteria": "Verhelder de acceptatiecriteria",
+  "seed|Split items that are too large": "Splits items die te groot zijn",
+  "seed|Estimate in story points": "Schat in story points",
+  "seed|Check each item against the Definition of Ready":
+    "Toets elk item aan de Definition of Ready",
+  "seed|Recap the Sprint Goal": "Blik terug op het Sprint Goal",
+  "seed|Demonstrate what is Done": "Demonstreer wat Done is",
+  "seed|Be honest about what is not Done": "Wees eerlijk over wat niet Done is",
+  "seed|Collect stakeholder feedback": "Verzamel feedback van stakeholders",
+  "seed|Discuss what this means for the next Sprint":
+    "Bespreek wat dit betekent voor de volgende Sprint",
+  "seed|Set the stage and re-read last retro's actions":
+    "Zet de toon en lees de acties van de vorige retro terug",
+  "seed|Gather data — what happened?": "Verzamel data — wat is er gebeurd?",
+  "seed|Generate insights — why?": "Genereer inzichten — waarom?",
+  "seed|Decide on at most two actions with an owner": "Kies maximaal twee acties met een eigenaar",
+  "seed|Close the retro": "Sluit de retro af",
+  "seed|Code reviewed by someone else": "Code gereviewd door iemand anders",
+  "seed|Automated tests written and green": "Geautomatiseerde tests geschreven en groen",
+  "seed|Merged to the main branch": "Gemerged naar de main branch",
+  "seed|Acceptance criteria demonstrably met": "Acceptatiecriteria aantoonbaar gehaald",
+  "seed|Documentation updated": "Documentatie bijgewerkt",
+  "seed|Deployed to the test environment": "Uitgerold naar de testomgeving",
+  "seed|No known defects left open": "Geen bekende defects open",
+  "seed|Written from the user's point of view":
+    "Geschreven vanuit het perspectief van de gebruiker",
+  "seed|Acceptance criteria are clear": "Acceptatiecriteria zijn duidelijk",
+  "seed|Dependencies identified": "Afhankelijkheden in kaart",
+  "seed|Small enough to finish inside one Sprint": "Klein genoeg om binnen één Sprint af te ronden",
+  "seed|Estimated by the team": "Ingeschat door het team",
+  "seed|The team understands the why": "Het team begrijpt het waarom",
+  "seed|Working agreement": "Werkafspraak",
+  "seed|How we work together": "Hoe we samenwerken",
+  "seed|Core hours 10:00–16:00": "Kernuren 10:00–16:00",
+  "seed|Daily Scrum at 09:30, cameras on": "Daily Scrum om 09:30, camera's aan",
+  "seed|Pull requests reviewed within one working day":
+    "Pull requests binnen één werkdag gereviewd",
+  "seed|Blocked longer than a day? Raise it as an impediment":
+    "Langer dan een dag geblokkeerd? Meld het als impediment",
+  "seed|No new work started while something is blocked":
+    "Geen nieuw werk starten zolang er iets geblokkeerd is",
 };
 
 

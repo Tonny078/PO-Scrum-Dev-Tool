@@ -8,7 +8,7 @@ Built by **Tonny Sluijs**. Free to use for everyone.
 
 ---
 
-## The two tools
+## The three tools
 
 | File | For | What it does |
 |---|---|---|
@@ -134,13 +134,17 @@ Shortcuts: `/` search · `n` new task · `s` new snippet · `c` new command · `
 
 ## English or Dutch
 
-Every tool has an **EN | NL** switch in the top bar, and a matching row in **Settings → Appearance**. It translates the interface — navigation, headings, buttons, forms, empty states, messages, dialogs and the built-in reference material.
+Every tool has an **EN | NL** switch in the top bar, and a matching row in **Settings → Appearance**. It translates the interface — navigation, headings, buttons, forms, empty states, messages, dialogs, tooltips, relative times ("3 d geleden") and the built-in reference material. Dates follow your choice too, so NL reads *10 sep 2026* instead of *10 Sept 2026*.
+
+The first-run screen carries its own **EN | NL** switch, because the setup dialog covers the top bar — so you can pick Dutch before you choose where your data lives.
 
 **Your data is never touched.** The language is a display setting, stored under its own key (`po.lang`, `sm.lang`, `dev.lang`) and deliberately kept *outside* the workspace. `settings.json`, the folder JSON files and the export bundle come out byte-for-byte identical whichever language you are reading. Switching language never rewrites a single saved record.
 
+**The built-in starter content reads Dutch too** — the board columns, the checklists, the Definition of Done and Ready, and the ceremony agendas that each tool fills in on first run. Those are *shown* translated while the saved record keeps its English text, so your export stays identical and nothing is rewritten behind your back. Rename or edit one yourself and your own wording sticks, in either language.
+
 Two things stay in English on purpose:
 
-- **Anything already saved as your data** — your board column names, the starter Definition of Done, the seeded checklists, and the activity log. Those are records, not interface; translating them would mean editing your workspace behind your back. Rename a column yourself and your name sticks.
+- **The activity log** — each line is written at the moment it happens, so it is a record rather than interface. Translating it would mean rewriting entries you already have.
 - **The vocabulary Dutch teams already use in English** — Sprint, Backlog, Kanban, Daily Scrum, Definition of Done, Retrospective, velocity, burndown, story points, commit, branch, pull request, deploy. Translating those reads as worse Dutch, not better. Git commands, HTTP status codes and keyboard shortcuts also keep their exact form, since you type and grep for them.
 
 New here? It opens in English, exactly as before. Nothing changes until you click NL.
@@ -178,6 +182,8 @@ To change something, open the file in any editor. The script is laid out in numb
 
 Each tool carries its own Dutch catalog in section 18b, at the foot of the file, keyed by the English text itself. A missing entry simply renders the English, so the catalog is safe to edit and never breaks the page. To change a word, find the English on the left and edit the Dutch on the right.
 
+The block at the end of that catalog, with keys prefixed `seed|`, is the starter content — the checklists, columns, agendas and Definitions that the `seed*` and `default*` functions write into a new workspace. Those keys are read only by `_sd()`, and only ever change what is on screen: the saved record keeps the English. They deliberately do **not** fall back to the plain key, so a note you happen to title "Settings" can never come back as "Instellingen".
+
 Roughly seven hundred entries are shared between the three tools. They are duplicated because a single-file app cannot import anything — so check them against each other after an edit:
 
 ```bash
@@ -203,10 +209,6 @@ Issues and pull requests are welcome. Please keep the two ground rules that make
 Free to use, copy, modify and share, for any purpose, personal or commercial — no attribution required and no strings attached.
 
 If you are cloning this to make it your own, the MIT licence is a good fit; add a `LICENSE` file with your own name as the copyright holder.
-
----
-
-*Built by Tonny Sluijs. If these save you time, that is the whole point.*
 
 ---
 
